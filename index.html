@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Pulso</title>
+    <meta name="description" content="Finanças pessoais simples para entender pequenos gastos do dia a dia." />
+    <meta name="theme-color" content="#06172a" />
+    <meta name="background-color" content="#020912" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Pulso" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="phone-frame" aria-label="Protótipo do app Pulso">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Pulso</p>
+            <h1 id="screen-title">Seu dinheiro, sem ruído.</h1>
+            <span class="period-chip" id="screen-period">Este mês</span>
+          </div>
+          <button class="icon-button" id="reset-demo" type="button" aria-label="Restaurar dados de demonstração">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v6h6" />
+            </svg>
+          </button>
+        </header>
+
+        <section class="content-area">
+          <section class="tab-panel active" id="tab-summary" data-title="Seu dinheiro, sem ruído.">
+            <article class="balance-card">
+              <div class="card-glow"></div>
+              <p>Saldo atual <span id="summary-period">este mês</span></p>
+              <strong id="current-balance">R$ 0,00</strong>
+              <span id="balance-note">Um retrato simples do mês.</span>
+              <div class="pulse-line" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+            </article>
+
+            <div class="metric-grid">
+              <article class="metric-card income">
+                <span>Entradas</span>
+                <strong id="total-income">R$ 0,00</strong>
+              </article>
+              <article class="metric-card expense">
+                <span>Saídas</span>
+                <strong id="total-expense">R$ 0,00</strong>
+              </article>
+            </div>
+
+            <article class="behavior-card">
+              <div>
+                <span class="mini-label">Comportamento</span>
+                <strong id="behavior-title">Estável</strong>
+                <p id="behavior-copy">Seu mês ainda está tomando forma.</p>
+              </div>
+              <div class="behavior-ring" id="behavior-ring"><span id="behavior-percent">0%</span></div>
+            </article>
+
+            <div class="section-heading">
+              <h2>Recentes</h2>
+              <button class="text-button" data-open-tab="history" type="button">Ver tudo</button>
+            </div>
+            <div class="movement-list compact" id="recent-list"></div>
+
+            <div class="section-heading">
+              <h2>Leituras rápidas</h2>
+            </div>
+            <div class="insight-stack" id="quick-insights"></div>
+          </section>
+
+          <section class="tab-panel" id="tab-history" data-title="Histórico claro, sem esforço.">
+            <div class="filter-row" role="tablist" aria-label="Filtros do histórico">
+              <button class="filter-pill active" type="button" data-filter="all">Todos</button>
+              <button class="filter-pill" type="button" data-filter="income">Entradas</button>
+              <button class="filter-pill" type="button" data-filter="expense">Saídas</button>
+            </div>
+            <div class="movement-list" id="history-list"></div>
+          </section>
+
+          <section class="tab-panel" id="tab-analysis" data-title="A forma dos seus gastos.">
+            <article class="analysis-hero">
+              <div class="analysis-copy">
+                <span class="mini-label" id="analysis-period">Análise do mês</span>
+                <strong id="top-category">Sem dados</strong>
+                <p id="top-category-copy">Adicione saídas para revelar padrões.</p>
+                <div class="analysis-stats">
+                  <span id="analysis-total">R$ 0,00 em saídas</span>
+                  <span id="analysis-count">0 movimentos</span>
+                </div>
+              </div>
+              <div class="donut-wrap">
+                <div class="donut" id="category-donut" aria-hidden="true"></div>
+                <span id="donut-center">0%</span>
+              </div>
+            </article>
+            <div class="section-heading">
+              <h2>Por categoria</h2>
+            </div>
+            <div class="category-bars" id="category-bars"></div>
+          </section>
+
+          <section class="tab-panel" id="tab-insights" data-title="Pequenos sinais, boas decisões.">
+            <article class="insight-lead">
+              <span class="mini-label">Pulso do mês</span>
+              <strong id="insight-headline">Seu padrão aparece aqui.</strong>
+              <p id="insight-subtitle">As frases mudam automaticamente com suas movimentações.</p>
+            </article>
+            <div class="insight-stack large" id="insights-list"></div>
+          </section>
+        </section>
+
+        <button class="fab" id="open-form" type="button" aria-label="Adicionar movimentação">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+        </button>
+        <div class="save-toast" id="save-toast" role="status" aria-live="polite">Movimentação salva</div>
+
+        <nav class="bottom-tabs" aria-label="Abas principais">
+          <button class="nav-tab active" type="button" data-tab="summary">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 12 5l8 7.5" /><path d="M6.5 11.5V20h11v-8.5" /></svg>
+            <span>Resumo</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="history">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12" /><path d="M8 12h12" /><path d="M8 18h12" /><path d="M4 6h.01" /><path d="M4 12h.01" /><path d="M4 18h.01" /></svg>
+            <span>Histórico</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="analysis">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-4" /><path d="M12 16V8" /><path d="M16 16v-6" /></svg>
+            <span>Análise</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="insights">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3" /><path d="M18.4 5.6 16.3 7.7" /><path d="M21 12h-3" /><path d="M6 12H3" /><path d="M7.7 7.7 5.6 5.6" /><path d="M9 18h6" /><path d="M10 21h4" /><path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" /></svg>
+            <span>Insights</span>
+          </button>
+        </nav>
+      </section>
+    </main>
+
+    <section class="sheet" id="movement-sheet" aria-hidden="true">
+      <div class="sheet-backdrop" data-close-sheet></div>
+      <form class="movement-form" id="movement-form">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="sheet-header">
+          <div>
+            <p class="eyebrow">Movimentação</p>
+            <h2 id="form-title">Adicionar rápido</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-sheet aria-label="Fechar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
+        </div>
+
+        <input type="hidden" id="movement-id" />
+        <div class="type-toggle" role="group" aria-label="Tipo de movimentação">
+          <button class="toggle-option active" type="button" data-type="expense">Saída</button>
+          <button class="toggle-option" type="button" data-type="income">Entrada</button>
+        </div>
+
+        <label class="field value-field">
+          <span>Valor</span>
+          <input id="amount" type="text" inputmode="decimal" placeholder="0,00" required />
+        </label>
+
+        <div class="field category-field">
+          <span>Categoria <small id="category-context">para saída</small></span>
+          <input id="category" type="hidden" required />
+          <div class="category-picker" id="category-picker" role="listbox" aria-label="Categorias"></div>
+        </div>
+
+        <label class="field">
+          <span>Descrição curta</span>
+          <input id="description" type="text" maxlength="42" placeholder="Café, mercado, freela..." required />
+        </label>
+
+        <label class="field">
+          <span>Data</span>
+          <input id="date" type="date" required />
+        </label>
+
+        <button class="primary-action" type="submit">Salvar movimentação</button>
+      </form>
+    </section>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
