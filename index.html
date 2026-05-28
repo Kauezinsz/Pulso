@@ -175,7 +175,10 @@
         <div class="field category-field">
           <span>Categoria <small id="category-context">para saída</small></span>
           <input id="category" type="hidden" required />
-          <div class="category-picker" id="category-picker" role="listbox" aria-label="Categorias"></div>
+          <button class="category-select" id="category-select" type="button" aria-haspopup="dialog">
+            <span id="category-select-label">Escolher categoria</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          </button>
         </div>
 
         <label class="field">
@@ -190,6 +193,33 @@
 
         <button class="primary-action" type="submit">Salvar movimentação</button>
       </form>
+    </section>
+
+    <section class="sheet category-sheet" id="category-sheet" aria-hidden="true">
+      <div class="sheet-backdrop" data-close-category-sheet></div>
+      <div class="movement-form category-form" role="dialog" aria-modal="true" aria-labelledby="category-sheet-title">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="sheet-header">
+          <div>
+            <p class="eyebrow" id="category-sheet-context">Categorias</p>
+            <h2 id="category-sheet-title">Escolher categoria</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-category-sheet aria-label="Fechar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
+        </div>
+
+        <div class="category-list" id="category-list" role="listbox" aria-label="Categorias disponíveis"></div>
+
+        <div class="new-category-panel" id="new-category-panel" hidden>
+          <label class="field">
+            <span>Nova categoria</span>
+            <input id="new-category-name" type="text" maxlength="28" placeholder="Nome da categoria" />
+          </label>
+          <button class="primary-action compact" id="save-category" type="button">Salvar categoria</button>
+          <p class="form-note" id="category-error" role="alert"></p>
+        </div>
+      </div>
     </section>
 
     <script src="./app.js"></script>

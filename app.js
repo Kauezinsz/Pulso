@@ -1,4 +1,5 @@
 const STORAGE_KEY = "pulso.movements.v1";
+const CATEGORY_STORAGE_KEY = "pulso.categories.v1";
 
 const categoryMeta = {
   salário: { icon: "S", color: "#5dffb1" },
@@ -15,7 +16,7 @@ const categoryMeta = {
   outros: { icon: "O", color: "#8aa1b8" },
 };
 
-const categoriesByType = {
+const defaultCategoriesByType = {
   income: ["salário", "freelance", "venda", "outros"],
   expense: ["alimentação", "transporte", "moradia", "contas", "lazer", "saúde", "compras", "trabalho", "outros"],
 };
@@ -36,7 +37,8 @@ const state = {
   activeTab: "summary",
   activeFilter: "all",
   formType: "expense",
-  selectedCategory: "alimentação",
+  selectedCategory: "",
+  categories: loadCategories(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -80,7 +82,15 @@ const elements = {
   amount: $("#amount"),
   category: $("#category"),
   categoryContext: $("#category-context"),
-  categoryPicker: $("#category-picker"),
+  categorySelect: $("#category-select"),
+  categorySelectLabel: $("#category-select-label"),
+  categorySheet: $("#category-sheet"),
+  categorySheetContext: $("#category-sheet-context"),
+  categoryList: $("#category-list"),
+  newCategoryPanel: $("#new-category-panel"),
+  newCategoryName: $("#new-category-name"),
+  saveCategory: $("#save-category"),
+  categoryError: $("#category-error"),
   description: $("#description"),
   date: $("#date"),
 };
@@ -88,7 +98,7 @@ const elements = {
 init();
 
 function init() {
-  renderCategoryPicker();
+  updateCategoryField();
   bindEvents();
   registerServiceWorker();
   render();
@@ -123,9 +133,14 @@ function bindEvents() {
   });
 
   $("#open-form").addEventListener("click", () => openSheet());
+  elements.categorySelect.addEventListener("click", openCategorySheet);
 
   $$("[data-close-sheet]").forEach((element) => {
     element.addEventListener("click", closeSheet);
+  });
+
+  $$("[data-close-category-sheet]").forEach((element) => {
+    element.addEventListener("click", closeCategorySheet);
   });
 
   $$(".toggle-option").forEach((button) => {
@@ -144,6 +159,13 @@ function bindEvents() {
   });
 
   elements.form.addEventListener("submit", saveMovement);
+  elements.saveCategory.addEventListener("click", saveNewCategory);
+  elements.newCategoryName.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveNewCategory();
+    }
+  });
 
   $("#reset-demo").addEventListener("click", () => {
     state.movements = demoMovements.map((movement) => ({ ...movement, id: crypto.randomUUID() }));
@@ -152,27 +174,11 @@ function bindEvents() {
   });
 }
 
-function renderCategoryPicker(preferredCategory = state.selectedCategory) {
-  const categories = categoriesByType[state.formType];
-  const nextCategory = categories.includes(preferredCategory) ? preferredCategory : categories[0];
-
+function updateCategoryField() {
   elements.categoryContext.textContent = state.formType === "income" ? "para entrada" : "para saída";
-  elements.categoryPicker.classList.remove("switching");
-  void elements.categoryPicker.offsetWidth;
-  elements.categoryPicker.classList.add("switching");
-  elements.categoryPicker.innerHTML = categories
-    .map((category) => {
-      const meta = getCategoryMeta(category);
-      return `<button class="category-option" type="button" role="option" data-category="${category}" style="--category-color:${meta.color}" aria-selected="false">
-        <span>${meta.icon}</span>
-        ${capitalize(category)}
-      </button>`;
-    })
-    .join("");
-  elements.categoryPicker.querySelectorAll("[data-category]").forEach((button) => {
-    button.addEventListener("click", () => selectCategory(button.dataset.category));
-  });
-  selectCategory(nextCategory);
+  elements.category.value = state.selectedCategory;
+  elements.categorySelect.classList.toggle("has-value", Boolean(state.selectedCategory));
+  elements.categorySelectLabel.textContent = state.selectedCategory ? capitalize(state.selectedCategory) : "Escolher categoria";
 }
 
 function setActiveTab(tab) {
@@ -189,8 +195,7 @@ function openSheet(movement = null) {
   elements.date.value = new Date().toISOString().slice(0, 10);
   elements.movementId.value = "";
   elements.formTitle.textContent = "Adicionar rápido";
-  setFormType("expense");
-  renderCategoryPicker("alimentação");
+  setFormType("expense", { preserveCategory: false });
 
   if (movement) {
     elements.formTitle.textContent = "Editar movimento";
@@ -198,8 +203,8 @@ function openSheet(movement = null) {
     elements.amount.value = formatMoneyInput(movement.amount);
     elements.description.value = movement.description;
     elements.date.value = movement.date;
-    setFormType(movement.type);
-    renderCategoryPicker(movement.category);
+    setFormType(movement.type, { preserveCategory: true });
+    selectCategory(movement.category);
   }
 
   elements.sheet.classList.add("open");
@@ -212,20 +217,86 @@ function closeSheet() {
   elements.sheet.setAttribute("aria-hidden", "true");
 }
 
-function setFormType(type) {
+function setFormType(type, options = {}) {
   state.formType = type;
   $$(".toggle-option").forEach((button) => button.classList.toggle("active", button.dataset.type === type));
-  renderCategoryPicker();
+  const currentIsValid = getCategoriesForType(type).includes(state.selectedCategory);
+  if (!options.preserveCategory || !currentIsValid) {
+    state.selectedCategory = "";
+  }
+  updateCategoryField();
 }
 
 function selectCategory(category) {
   state.selectedCategory = category;
-  elements.category.value = category;
-  elements.categoryPicker.querySelectorAll("[data-category]").forEach((button) => {
-    const active = button.dataset.category === category;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
+  updateCategoryField();
+  renderCategoryList();
+}
+
+function openCategorySheet() {
+  elements.categorySheet.classList.add("open");
+  elements.categorySheet.setAttribute("aria-hidden", "false");
+  elements.newCategoryPanel.hidden = true;
+  elements.categoryError.textContent = "";
+  elements.newCategoryName.value = "";
+  renderCategoryList();
+}
+
+function closeCategorySheet() {
+  elements.categorySheet.classList.remove("open");
+  elements.categorySheet.setAttribute("aria-hidden", "true");
+}
+
+function renderCategoryList() {
+  const categories = getCategoriesForType(state.formType);
+  elements.categorySheetContext.textContent = state.formType === "income" ? "Entrada" : "Saída";
+  elements.categoryList.innerHTML = `${categories
+    .map((category) => {
+      const selected = category === state.selectedCategory;
+      return `<button class="category-list-item ${selected ? "active" : ""}" type="button" data-category="${category}" role="option" aria-selected="${selected}">
+        <span>${capitalize(category)}</span>
+        ${selected ? '<strong>Selecionada</strong>' : ""}
+      </button>`;
+    })
+    .join("")}
+    <button class="category-list-item create" type="button" data-create-category>
+      <span>Criar nova categoria</span>
+      <strong>+</strong>
+    </button>`;
+
+  elements.categoryList.querySelectorAll("[data-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectCategory(button.dataset.category);
+      closeCategorySheet();
+    });
   });
+
+  elements.categoryList.querySelector("[data-create-category]").addEventListener("click", () => {
+    elements.newCategoryPanel.hidden = false;
+    elements.categoryError.textContent = "";
+    setTimeout(() => elements.newCategoryName.focus(), 80);
+  });
+}
+
+function saveNewCategory() {
+  const category = normalizeCategoryName(elements.newCategoryName.value);
+  const categories = getCategoriesForType(state.formType);
+
+  if (!category) {
+    elements.categoryError.textContent = "Digite um nome curto para a categoria.";
+    return;
+  }
+
+  if (categories.some((item) => sameCategory(item, category))) {
+    elements.categoryError.textContent = "Essa categoria já existe para este tipo.";
+    return;
+  }
+
+  state.categories[state.formType] = [...categories, category];
+  persistCategories();
+  selectCategory(category);
+  showToast("Categoria criada", "success");
+  closeCategorySheet();
 }
 
 function saveMovement(event) {
@@ -242,6 +313,12 @@ function saveMovement(event) {
   };
 
   if (!movement.amount || movement.amount <= 0 || !movement.description || !movement.date) {
+    return;
+  }
+
+  if (!movement.category) {
+    showToast("Escolha uma categoria", "neutral");
+    openCategorySheet();
     return;
   }
 
@@ -624,8 +701,56 @@ function loadMovements() {
   }
 }
 
+function loadCategories() {
+  const stored = localStorage.getItem(CATEGORY_STORAGE_KEY);
+  if (!stored) return cloneDefaultCategories();
+
+  try {
+    const parsed = JSON.parse(stored);
+    return {
+      income: mergeCategories(defaultCategoriesByType.income, parsed.income),
+      expense: mergeCategories(defaultCategoriesByType.expense, parsed.expense),
+    };
+  } catch {
+    return cloneDefaultCategories();
+  }
+}
+
 function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.movements));
+}
+
+function persistCategories() {
+  localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(state.categories));
+}
+
+function getCategoriesForType(type) {
+  return state.categories[type] || defaultCategoriesByType[type];
+}
+
+function mergeCategories(defaults, saved = []) {
+  return [...defaults, ...saved].reduce((categories, category) => {
+    const normalized = normalizeCategoryName(category);
+    if (normalized && !categories.some((item) => sameCategory(item, normalized))) {
+      categories.push(normalized);
+    }
+    return categories;
+  }, []);
+}
+
+function cloneDefaultCategories() {
+  return {
+    income: [...defaultCategoriesByType.income],
+    expense: [...defaultCategoriesByType.expense],
+  };
+}
+
+function normalizeCategoryName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+}
+
+function sameCategory(left, right) {
+  return left.toLocaleLowerCase("pt-BR") === right.toLocaleLowerCase("pt-BR");
 }
 
 function periodLabel(tab) {
