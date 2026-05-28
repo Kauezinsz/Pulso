@@ -39,6 +39,10 @@ const state = {
   formType: "expense",
   selectedCategory: "",
   categories: loadCategories(),
+  categoryEditorMode: "create",
+  editingCategory: "",
+  analysisType: "expense",
+  activeAnalysisCategory: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -74,6 +78,7 @@ const elements = {
   categoryBars: $("#category-bars"),
   categoryDonut: $("#category-donut"),
   donutCenter: $("#donut-center"),
+  analysisTypeButtons: $$(".analysis-type"),
   saveToast: $("#save-toast"),
   sheet: $("#movement-sheet"),
   form: $("#movement-form"),
@@ -87,7 +92,9 @@ const elements = {
   categorySheet: $("#category-sheet"),
   categorySheetContext: $("#category-sheet-context"),
   categoryList: $("#category-list"),
+  categoryFeedback: $("#category-feedback"),
   newCategoryPanel: $("#new-category-panel"),
+  categoryEditorTitle: $("#category-editor-title"),
   newCategoryName: $("#new-category-name"),
   saveCategory: $("#save-category"),
   categoryError: $("#category-error"),
@@ -129,6 +136,15 @@ function bindEvents() {
       state.activeFilter = button.dataset.filter;
       $$(".filter-pill").forEach((pill) => pill.classList.toggle("active", pill === button));
       renderHistory();
+    });
+  });
+
+  elements.analysisTypeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.analysisType = button.dataset.analysisType;
+      state.activeAnalysisCategory = "";
+      elements.analysisTypeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      renderAnalysis(getTotals());
     });
   });
 
@@ -236,8 +252,9 @@ function selectCategory(category) {
 function openCategorySheet() {
   elements.categorySheet.classList.add("open");
   elements.categorySheet.setAttribute("aria-hidden", "false");
-  elements.newCategoryPanel.hidden = true;
+  closeCategoryEditor();
   elements.categoryError.textContent = "";
+  elements.categoryFeedback.textContent = "";
   elements.newCategoryName.value = "";
   renderCategoryList();
 }
@@ -253,10 +270,22 @@ function renderCategoryList() {
   elements.categoryList.innerHTML = `${categories
     .map((category) => {
       const selected = category === state.selectedCategory;
-      return `<button class="category-list-item ${selected ? "active" : ""}" type="button" data-category="${category}" role="option" aria-selected="${selected}">
-        <span>${capitalize(category)}</span>
-        ${selected ? '<strong>Selecionada</strong>' : ""}
-      </button>`;
+      const custom = isCustomCategory(state.formType, category);
+      const removable = canDeleteCategory(category);
+      return `<div class="category-list-item ${selected ? "active" : ""} ${custom ? "custom" : ""}" role="option" aria-selected="${selected}">
+        <button class="category-main-action" type="button" data-category="${category}">
+          <span>${capitalize(category)}</span>
+          ${selected ? "<strong>Selecionada</strong>" : ""}
+        </button>
+        ${
+          custom || removable
+            ? `<div class="category-manage-actions">
+                ${custom ? `<button type="button" data-rename-category="${category}" aria-label="Renomear ${escapeHtml(category)}">Editar</button>` : ""}
+                ${removable ? `<button type="button" data-delete-category="${category}" aria-label="Excluir ${escapeHtml(category)}">Excluir</button>` : ""}
+              </div>`
+            : ""
+        }
+      </div>`;
     })
     .join("")}
     <button class="category-list-item create" type="button" data-create-category>
@@ -271,32 +300,139 @@ function renderCategoryList() {
     });
   });
 
+  elements.categoryList.querySelectorAll("[data-rename-category]").forEach((button) => {
+    button.addEventListener("click", () => openCategoryEditor("rename", button.dataset.renameCategory));
+  });
+
+  elements.categoryList.querySelectorAll("[data-delete-category]").forEach((button) => {
+    button.addEventListener("click", () => confirmDeleteCategory(button.dataset.deleteCategory));
+  });
+
   elements.categoryList.querySelector("[data-create-category]").addEventListener("click", () => {
-    elements.newCategoryPanel.hidden = false;
-    elements.categoryError.textContent = "";
-    setTimeout(() => elements.newCategoryName.focus(), 80);
+    openCategoryEditor("create");
   });
 }
 
 function saveNewCategory() {
   const category = normalizeCategoryName(elements.newCategoryName.value);
   const categories = getCategoriesForType(state.formType);
+  const isRename = state.categoryEditorMode === "rename";
+  const originalCategory = state.editingCategory;
 
   if (!category) {
     elements.categoryError.textContent = "Digite um nome curto para a categoria.";
     return;
   }
 
-  if (categories.some((item) => sameCategory(item, category))) {
+  if (categories.some((item) => sameCategory(item, category) && !sameCategory(item, originalCategory))) {
     elements.categoryError.textContent = "Essa categoria já existe para este tipo.";
     return;
   }
 
-  state.categories[state.formType] = [...categories, category];
+  if (isRename) {
+    state.categories[state.formType] = categories.map((item) => (sameCategory(item, originalCategory) ? category : item));
+    state.movements = state.movements.map((movement) => {
+      if (movement.type === state.formType && sameCategory(movement.category, originalCategory)) {
+        return { ...movement, category };
+      }
+      return movement;
+    });
+    persist();
+  } else {
+    state.categories[state.formType] = [...categories, category];
+  }
+
   persistCategories();
   selectCategory(category);
-  showToast("Categoria criada", "success");
-  closeCategorySheet();
+  showToast(isRename ? "Categoria renomeada" : "Categoria criada", "success");
+  closeCategoryEditor();
+  render();
+}
+
+function openCategoryEditor(mode, category = "") {
+  state.categoryEditorMode = mode;
+  state.editingCategory = category;
+  elements.newCategoryPanel.hidden = false;
+  elements.categoryEditorTitle.textContent = mode === "rename" ? "Renomear categoria" : "Nova categoria";
+  elements.saveCategory.textContent = mode === "rename" ? "Salvar alteração" : "Salvar categoria";
+  elements.categoryError.textContent = "";
+  elements.newCategoryName.value = mode === "rename" ? capitalize(category) : "";
+  setTimeout(() => {
+    elements.newCategoryName.focus();
+    elements.newCategoryName.select();
+  }, 80);
+}
+
+function closeCategoryEditor() {
+  state.categoryEditorMode = "create";
+  state.editingCategory = "";
+  elements.newCategoryPanel.hidden = true;
+  elements.categoryEditorTitle.textContent = "Nova categoria";
+  elements.saveCategory.textContent = "Salvar categoria";
+  elements.categoryError.textContent = "";
+  elements.newCategoryName.value = "";
+}
+
+function confirmDeleteCategory(category) {
+  if (!canDeleteCategory(category)) {
+    showCategoryFeedback("Outros é a categoria de segurança e não pode ser excluída.");
+    return;
+  }
+
+  const affected = state.movements.filter((movement) => movement.type === state.formType && sameCategory(movement.category, category)).length;
+  if (affected > 0) {
+    showCategoryFeedback("Há lançamentos utilizando esta categoria. Para excluí-la, altere ou remova esses lançamentos primeiro.");
+    showToast("Há lançamentos utilizando esta categoria.", "neutral");
+    state.pendingDeleteCategory = "";
+    return;
+  }
+
+  if (state.pendingDeleteCategory === category) {
+    deleteCategory(category);
+    return;
+  }
+
+  state.pendingDeleteCategory = category;
+  showCategoryFeedback("Toque novamente em Excluir para confirmar.");
+  showToast("Confirme a exclusão", "neutral");
+  clearTimeout(confirmDeleteCategory.timeout);
+  confirmDeleteCategory.timeout = setTimeout(() => {
+    if (state.pendingDeleteCategory === category) {
+      state.pendingDeleteCategory = "";
+      elements.categoryFeedback.textContent = "";
+    }
+  }, 4200);
+}
+
+function deleteCategory(category) {
+  if (!canDeleteCategory(category)) return;
+
+  const affected = state.movements.some((movement) => movement.type === state.formType && sameCategory(movement.category, category));
+  if (affected) {
+    showCategoryFeedback("Há lançamentos utilizando esta categoria. Para excluí-la, altere ou remova esses lançamentos primeiro.");
+    showToast("Há lançamentos utilizando esta categoria.", "neutral");
+    return;
+  }
+
+  state.categories[state.formType] = getCategoriesForType(state.formType).filter((item) => !sameCategory(item, category));
+
+  if (sameCategory(state.selectedCategory, category)) {
+    selectCategory("outros");
+  }
+
+  state.pendingDeleteCategory = "";
+  persist();
+  persistCategories();
+  closeCategoryEditor();
+  renderCategoryList();
+  render();
+  showToast("Categoria removida", "neutral");
+}
+
+function showCategoryFeedback(message) {
+  elements.categoryFeedback.textContent = message;
+  elements.categoryFeedback.classList.remove("show");
+  requestAnimationFrame(() => elements.categoryFeedback.classList.add("show"));
 }
 
 function saveMovement(event) {
@@ -424,29 +560,31 @@ function renderHistory() {
 }
 
 function renderAnalysis(totals) {
-  const grouped = groupExpensesByCategory();
+  const grouped = groupMovementsByCategory(state.analysisType);
   const top = grouped[0];
-  const expenseCount = state.movements.filter((movement) => movement.type === "expense").length;
+  const typeTotal = grouped.reduce((sum, item) => sum + item.total, 0);
+  const movementCount = state.movements.filter((movement) => movement.type === state.analysisType).length;
+  const typeLabel = state.analysisType === "expense" ? "saídas" : "entradas";
+  const typeTitle = state.analysisType === "expense" ? "Gastos" : "Receitas";
 
-  elements.analysisPeriod.textContent = `Análise de ${monthFormatter.format(new Date())}`;
-  elements.analysisTotal.textContent = `${currency.format(totals.expense)} em saídas`;
-  elements.analysisCount.textContent = `${expenseCount} movimento${expenseCount === 1 ? "" : "s"}`;
+  elements.analysisPeriod.textContent = `${typeTitle} de ${monthFormatter.format(new Date())}`;
+  elements.analysisTotal.textContent = `${currency.format(typeTotal)} em ${typeLabel}`;
+  elements.analysisCount.textContent = `${movementCount} movimento${movementCount === 1 ? "" : "s"}`;
 
   if (!top) {
-    elements.topCategory.textContent = "Sem gastos ainda";
-    elements.topCategoryCopy.textContent = "Registre uma saída para o Pulso desenhar a distribuição.";
-    elements.categoryBars.innerHTML = renderEmptyState("Análise limpa", "Suas categorias aparecem aqui com cor, peso e proporção.");
-    elements.categoryDonut.style.background = "conic-gradient(rgba(255,255,255,.08) 0 360deg)";
+    elements.topCategory.textContent = state.analysisType === "expense" ? "Sem gastos ainda" : "Sem receitas ainda";
+    elements.topCategoryCopy.textContent = `Registre ${state.analysisType === "expense" ? "uma saída" : "uma entrada"} para o Pulso desenhar a distribuição.`;
+    elements.categoryBars.innerHTML = renderEmptyState("Análise limpa", "Suas categorias aparecem aqui com peso, proporção e leitura rápida.");
+    elements.categoryDonut.innerHTML = "";
     elements.donutCenter.textContent = "0%";
     return;
   }
 
-  const topShare = Math.round((top.total / totals.expense) * 100);
-  elements.topCategory.textContent = capitalize(top.category);
-  elements.topCategoryCopy.textContent = `${topShare}% das saídas em ${periodLabel("analysis").toLowerCase()}. ${currency.format(top.total)} no total.`;
-  elements.donutCenter.textContent = `${topShare}%`;
-  elements.categoryBars.innerHTML = grouped.map((item) => renderCategoryRow(item, totals.expense)).join("");
-  elements.categoryDonut.style.background = buildDonutGradient(grouped, totals.expense);
+  const active = grouped.find((item) => item.category === state.activeAnalysisCategory) || top;
+  state.activeAnalysisCategory = active.category;
+  updateAnalysisFocus(active, typeTotal);
+  elements.categoryBars.innerHTML = grouped.map((item) => renderCategoryRow(item, typeTotal)).join("");
+  renderPieChart(grouped, typeTotal);
 }
 
 function renderInsights(totals) {
@@ -509,6 +647,44 @@ function renderCategoryRow(item, total) {
       <span>${item.count} movimento${item.count === 1 ? "" : "s"}</span>
     </div>
   </article>`;
+}
+
+function renderPieChart(grouped, total) {
+  let startAngle = -90;
+  elements.categoryDonut.innerHTML = `<svg viewBox="0 0 120 120" role="img" aria-label="Distribuição por categoria">
+    ${grouped
+      .map((item, index) => {
+        const angle = (item.total / total) * 360;
+        const endAngle = startAngle + angle;
+        const selected = item.category === state.activeAnalysisCategory;
+        const color = getCategoryColor(item.category, index);
+        const path = describeDonutSlice(60, 60, 52, 34, startAngle, endAngle);
+        startAngle = endAngle;
+        return `<path class="pie-slice ${selected ? "active" : ""}" d="${path}" fill="${color}" fill-rule="evenodd" data-category="${item.category}" data-index="${index}" />`;
+      })
+      .join("")}
+  </svg>`;
+
+  elements.categoryDonut.querySelectorAll("[data-category]").forEach((slice) => {
+    const activate = () => {
+      const item = grouped.find((entry) => entry.category === slice.dataset.category);
+      if (!item) return;
+      state.activeAnalysisCategory = item.category;
+      updateAnalysisFocus(item, total);
+      elements.categoryDonut.querySelectorAll(".pie-slice").forEach((entry) => entry.classList.toggle("active", entry === slice));
+    };
+    slice.addEventListener("pointerenter", activate);
+    slice.addEventListener("click", activate);
+    slice.addEventListener("touchstart", activate, { passive: true });
+  });
+}
+
+function updateAnalysisFocus(item, total) {
+  const share = Math.round((item.total / total) * 100);
+  const typeLabel = state.analysisType === "expense" ? "saídas" : "entradas";
+  elements.topCategory.textContent = capitalize(item.category);
+  elements.topCategoryCopy.textContent = `${share}% das ${typeLabel} em ${periodLabel("analysis").toLowerCase()}. ${currency.format(item.total)} no total.`;
+  elements.donutCenter.textContent = `${share}%`;
 }
 
 function renderInsightCard(insight) {
@@ -642,9 +818,13 @@ function getTotals() {
 }
 
 function groupExpensesByCategory() {
+  return groupMovementsByCategory("expense");
+}
+
+function groupMovementsByCategory(type) {
   const map = new Map();
   state.movements
-    .filter((movement) => movement.type === "expense")
+    .filter((movement) => movement.type === type)
     .forEach((movement) => {
       const current = map.get(movement.category) || { category: movement.category, total: 0, count: 0 };
       current.total += movement.amount;
@@ -665,6 +845,53 @@ function buildDonutGradient(grouped, total) {
     return slice;
   });
   return `conic-gradient(${slices.join(", ")})`;
+}
+
+function describeDonutSlice(cx, cy, outerRadius, innerRadius, startAngle, endAngle) {
+  const angle = endAngle - startAngle;
+  const gap = angle > 12 ? 1.6 : angle > 4 ? 0.7 : 0;
+  const start = startAngle + gap / 2;
+  const end = endAngle - gap / 2;
+
+  if (angle >= 359.9) {
+    return [
+      `M ${cx} ${cy - outerRadius}`,
+      `A ${outerRadius} ${outerRadius} 0 1 1 ${cx - 0.01} ${cy - outerRadius}`,
+      `A ${outerRadius} ${outerRadius} 0 1 1 ${cx} ${cy - outerRadius}`,
+      `M ${cx} ${cy - innerRadius}`,
+      `A ${innerRadius} ${innerRadius} 0 1 0 ${cx - 0.01} ${cy - innerRadius}`,
+      `A ${innerRadius} ${innerRadius} 0 1 0 ${cx} ${cy - innerRadius}`,
+      "Z",
+    ].join(" ");
+  }
+
+  const outerStart = polarToCartesian(cx, cy, outerRadius, start);
+  const outerEnd = polarToCartesian(cx, cy, outerRadius, end);
+  const innerEnd = polarToCartesian(cx, cy, innerRadius, end);
+  const innerStart = polarToCartesian(cx, cy, innerRadius, start);
+  const largeArcFlag = end - start > 180 ? "1" : "0";
+
+  return [
+    "M", outerStart.x, outerStart.y,
+    "A", outerRadius, outerRadius, 0, largeArcFlag, 1, outerEnd.x, outerEnd.y,
+    "L", innerEnd.x, innerEnd.y,
+    "A", innerRadius, innerRadius, 0, largeArcFlag, 0, innerStart.x, innerStart.y,
+    "Z",
+  ].join(" ");
+}
+
+function polarToCartesian(cx, cy, radius, angle) {
+  const radians = (angle * Math.PI) / 180;
+  return {
+    x: cx + radius * Math.cos(radians),
+    y: cy + radius * Math.sin(radians),
+  };
+}
+
+function getCategoryColor(category, index = 0) {
+  const fallback = ["#2ee7ff", "#5dffb1", "#ffd166", "#ff6f91", "#7aa7ff", "#9dffea", "#f4fbff", "#8aa1b8"];
+  const meta = categoryMeta[category];
+  return meta?.color || fallback[index % fallback.length];
 }
 
 function sumByPeriod(daysBack, startOffset = 0) {
@@ -708,8 +935,8 @@ function loadCategories() {
   try {
     const parsed = JSON.parse(stored);
     return {
-      income: mergeCategories(defaultCategoriesByType.income, parsed.income),
-      expense: mergeCategories(defaultCategoriesByType.expense, parsed.expense),
+      income: normalizeCategoryList(parsed.income, defaultCategoriesByType.income),
+      expense: normalizeCategoryList(parsed.expense, defaultCategoriesByType.expense),
     };
   } catch {
     return cloneDefaultCategories();
@@ -728,6 +955,18 @@ function getCategoriesForType(type) {
   return state.categories[type] || defaultCategoriesByType[type];
 }
 
+function canDeleteCategory(category) {
+  return !sameCategory(category, "outros");
+}
+
+function isDefaultCategory(type, category) {
+  return defaultCategoriesByType[type].some((item) => sameCategory(item, category));
+}
+
+function isCustomCategory(type, category) {
+  return !isDefaultCategory(type, category) && getCategoriesForType(type).some((item) => sameCategory(item, category));
+}
+
 function mergeCategories(defaults, saved = []) {
   return [...defaults, ...saved].reduce((categories, category) => {
     const normalized = normalizeCategoryName(category);
@@ -736,6 +975,23 @@ function mergeCategories(defaults, saved = []) {
     }
     return categories;
   }, []);
+}
+
+function normalizeCategoryList(saved, fallback) {
+  const source = Array.isArray(saved) && saved.length ? saved : fallback;
+  const categories = source.reduce((items, category) => {
+    const normalized = normalizeCategoryName(category);
+    if (normalized && !items.some((item) => sameCategory(item, normalized))) {
+      items.push(normalized);
+    }
+    return items;
+  }, []);
+
+  if (!categories.some((category) => sameCategory(category, "outros"))) {
+    categories.push("outros");
+  }
+
+  return categories;
 }
 
 function cloneDefaultCategories() {
@@ -750,7 +1006,7 @@ function normalizeCategoryName(value) {
 }
 
 function sameCategory(left, right) {
-  return left.toLocaleLowerCase("pt-BR") === right.toLocaleLowerCase("pt-BR");
+  return String(left || "").toLocaleLowerCase("pt-BR") === String(right || "").toLocaleLowerCase("pt-BR");
 }
 
 function periodLabel(tab) {

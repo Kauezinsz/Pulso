@@ -87,6 +87,10 @@
           </section>
 
           <section class="tab-panel" id="tab-analysis" data-title="A forma dos seus gastos.">
+            <div class="analysis-toggle" role="group" aria-label="Tipo de análise">
+              <button class="analysis-type active" type="button" data-analysis-type="expense">Gastos</button>
+              <button class="analysis-type" type="button" data-analysis-type="income">Receitas</button>
+            </div>
             <article class="analysis-hero">
               <div class="analysis-copy">
                 <span class="mini-label" id="analysis-period">Análise do mês</span>
@@ -98,7 +102,7 @@
                 </div>
               </div>
               <div class="donut-wrap">
-                <div class="donut" id="category-donut" aria-hidden="true"></div>
+                <div class="donut" id="category-donut" aria-label="Gráfico por categoria"></div>
                 <span id="donut-center">0%</span>
               </div>
             </article>
@@ -210,10 +214,11 @@
         </div>
 
         <div class="category-list" id="category-list" role="listbox" aria-label="Categorias disponíveis"></div>
+        <p class="form-note category-feedback" id="category-feedback" role="alert"></p>
 
         <div class="new-category-panel" id="new-category-panel" hidden>
           <label class="field">
-            <span>Nova categoria</span>
+            <span id="category-editor-title">Nova categoria</span>
             <input id="new-category-name" type="text" maxlength="28" placeholder="Nome da categoria" />
           </label>
           <button class="primary-action compact" id="save-category" type="button">Salvar categoria</button>
