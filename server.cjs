@@ -7,6 +7,7 @@ const { DatabaseSync } = require("node:sqlite");
 const root = __dirname;
 const host = "127.0.0.1";
 const port = Number(process.env.PORT || process.env.PULSO_PORT || 4173);
+const appBasePath = process.env.PULSO_BASE_PATH || "/pulso";
 const dataDir = path.join(root, "data");
 const dbPath = process.env.PULSO_DB_PATH || path.join(dataDir, "pulso.sqlite");
 
@@ -67,6 +68,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS movements (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cycle_id TEXT REFERENCES cycles(id) ON DELETE RESTRICT,
     type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
     amount REAL NOT NULL,
     category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
@@ -77,7 +79,22 @@ db.exec(`
     updated_at TEXT NOT NULL,
     UNIQUE(user_id, source_key)
   );
+
+  CREATE TABLE IF NOT EXISTS cycles (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active', 'closed')),
+    started_at TEXT NOT NULL,
+    closed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_cycles_one_active_per_user ON cycles(user_id) WHERE status = 'active';
 `);
+
+ensureMovementCycleColumn();
 
 const statements = {
   insertUser: db.prepare(`
@@ -99,6 +116,94 @@ const statements = {
   updateSessionSeen: db.prepare(`UPDATE sessions SET last_seen_at = ? WHERE id = ?`),
   deleteSessionById: db.prepare(`DELETE FROM sessions WHERE id = ?`),
   deleteSessionByTokenHash: db.prepare(`DELETE FROM sessions WHERE token_hash = ?`),
+  insertCycle: db.prepare(`
+    INSERT INTO cycles (id, user_id, label, status, started_at, closed_at, created_at, updated_at)
+    VALUES (@id, @userId, @label, @status, @startedAt, @closedAt, @createdAt, @updatedAt)
+  `),
+  updateCycleClose: db.prepare(`
+    UPDATE cycles
+    SET label = ?, status = 'closed', closed_at = ?, updated_at = ?
+    WHERE id = ? AND user_id = ? AND status = 'active'
+  `),
+  findCycleById: db.prepare(`
+    SELECT id, user_id AS userId, label, status, started_at AS startedAt, closed_at AS closedAt, created_at AS createdAt, updated_at AS updatedAt
+    FROM cycles
+    WHERE id = ? AND user_id = ?
+  `),
+  findActiveCycleByUser: db.prepare(`
+    SELECT id, user_id AS userId, label, status, started_at AS startedAt, closed_at AS closedAt, created_at AS createdAt, updated_at AS updatedAt
+    FROM cycles
+    WHERE user_id = ? AND status = 'active'
+    LIMIT 1
+  `),
+  listCyclesByUser: db.prepare(`
+    SELECT
+      cycles.id,
+      cycles.user_id AS userId,
+      cycles.label,
+      cycles.status,
+      cycles.started_at AS startedAt,
+      cycles.closed_at AS closedAt,
+      cycles.created_at AS createdAt,
+      cycles.updated_at AS updatedAt,
+      COALESCE(SUM(CASE WHEN movements.type = 'income' THEN movements.amount ELSE 0 END), 0) AS incomeTotal,
+      COALESCE(SUM(CASE WHEN movements.type = 'expense' THEN movements.amount ELSE 0 END), 0) AS expenseTotal,
+      COUNT(movements.id) AS movementCount
+    FROM cycles
+    LEFT JOIN movements
+      ON movements.cycle_id = cycles.id
+      AND movements.user_id = cycles.user_id
+    WHERE cycles.user_id = ?
+    GROUP BY cycles.id
+    ORDER BY CASE cycles.status WHEN 'active' THEN 0 ELSE 1 END, COALESCE(cycles.closed_at, cycles.started_at) DESC
+  `),
+  listClosedCyclesByUser: db.prepare(`
+    SELECT
+      cycles.id,
+      cycles.user_id AS userId,
+      cycles.label,
+      cycles.status,
+      cycles.started_at AS startedAt,
+      cycles.closed_at AS closedAt,
+      cycles.created_at AS createdAt,
+      cycles.updated_at AS updatedAt,
+      COALESCE(SUM(CASE WHEN movements.type = 'income' THEN movements.amount ELSE 0 END), 0) AS incomeTotal,
+      COALESCE(SUM(CASE WHEN movements.type = 'expense' THEN movements.amount ELSE 0 END), 0) AS expenseTotal,
+      COUNT(movements.id) AS movementCount
+    FROM cycles
+    LEFT JOIN movements
+      ON movements.cycle_id = cycles.id
+      AND movements.user_id = cycles.user_id
+    WHERE cycles.user_id = ? AND cycles.status = 'closed'
+    GROUP BY cycles.id
+    ORDER BY COALESCE(cycles.closed_at, cycles.started_at) DESC
+  `),
+  listCycleSummaryById: db.prepare(`
+    SELECT
+      cycles.id,
+      cycles.user_id AS userId,
+      cycles.label,
+      cycles.status,
+      cycles.started_at AS startedAt,
+      cycles.closed_at AS closedAt,
+      cycles.created_at AS createdAt,
+      cycles.updated_at AS updatedAt,
+      COALESCE(SUM(CASE WHEN movements.type = 'income' THEN movements.amount ELSE 0 END), 0) AS incomeTotal,
+      COALESCE(SUM(CASE WHEN movements.type = 'expense' THEN movements.amount ELSE 0 END), 0) AS expenseTotal,
+      COUNT(movements.id) AS movementCount
+    FROM cycles
+    LEFT JOIN movements
+      ON movements.cycle_id = cycles.id
+      AND movements.user_id = cycles.user_id
+    WHERE cycles.user_id = ? AND cycles.id = ?
+    GROUP BY cycles.id
+    LIMIT 1
+  `),
+  assignLegacyMovementsToCycle: db.prepare(`
+    UPDATE movements
+    SET cycle_id = ?
+    WHERE user_id = ? AND cycle_id IS NULL
+  `),
   listCategories: db.prepare(`
     SELECT id, type, name, slug, is_default AS isDefault, created_at AS createdAt, updated_at AS updatedAt
     FROM categories
@@ -113,6 +218,7 @@ const statements = {
   `),
   findCategoryById: db.prepare(`SELECT * FROM categories WHERE id = ? AND user_id = ?`),
   findCategoryBySlug: db.prepare(`SELECT * FROM categories WHERE user_id = ? AND type = ? AND slug = ?`),
+  countMovementsForCategory: db.prepare(`SELECT COUNT(*) AS count FROM movements WHERE user_id = ? AND category_id = ?`),
   insertCategory: db.prepare(`
     INSERT INTO categories (id, user_id, type, name, slug, is_default, created_at, updated_at)
     VALUES (@id, @userId, @type, @name, @slug, @isDefault, @createdAt, @updatedAt)
@@ -123,8 +229,7 @@ const statements = {
     WHERE id = ? AND user_id = ?
   `),
   deleteCategory: db.prepare(`DELETE FROM categories WHERE id = ? AND user_id = ?`),
-  countMovementsForCategory: db.prepare(`SELECT COUNT(*) AS count FROM movements WHERE user_id = ? AND category_id = ?`),
-  listMovements: db.prepare(`
+  listMovementsByCycle: db.prepare(`
     SELECT
       movements.id,
       movements.type,
@@ -132,6 +237,7 @@ const statements = {
       movements.description,
       movements.movement_date AS date,
       movements.category_id AS categoryId,
+      movements.cycle_id AS cycleId,
       movements.source_key AS sourceKey,
       movements.created_at AS createdAt,
       movements.updated_at AS updatedAt,
@@ -139,18 +245,46 @@ const statements = {
       categories.type AS categoryType
     FROM movements
     JOIN categories ON categories.id = movements.category_id
-    WHERE movements.user_id = ?
+    WHERE movements.user_id = ? AND movements.cycle_id = ?
+    ORDER BY movement_date DESC, movements.created_at DESC
+  `),
+  listMovementsByCycleNoJoin: db.prepare(`
+    SELECT
+      movements.id,
+      movements.type,
+      movements.amount,
+      movements.description,
+      movements.movement_date AS date,
+      movements.category_id AS categoryId,
+      movements.cycle_id AS cycleId,
+      movements.source_key AS sourceKey,
+      movements.created_at AS createdAt,
+      movements.updated_at AS updatedAt
+    FROM movements
+    WHERE movements.user_id = ? AND movements.cycle_id = ?
     ORDER BY movement_date DESC, movements.created_at DESC
   `),
   findMovementById: db.prepare(`SELECT * FROM movements WHERE id = ? AND user_id = ?`),
+  findActiveMovementById: db.prepare(`
+    SELECT movements.*
+    FROM movements
+    JOIN cycles ON cycles.id = movements.cycle_id
+    WHERE movements.id = ? AND movements.user_id = ? AND cycles.status = 'active'
+  `),
   findMovementBySource: db.prepare(`SELECT id FROM movements WHERE user_id = ? AND source_key = ?`),
+  findActiveMovementBySource: db.prepare(`
+    SELECT movements.id
+    FROM movements
+    JOIN cycles ON cycles.id = movements.cycle_id
+    WHERE movements.user_id = ? AND movements.source_key = ? AND cycles.status = 'active'
+  `),
   insertMovement: db.prepare(`
     INSERT INTO movements (
-      id, user_id, type, amount, category_id, description, movement_date,
+      id, user_id, cycle_id, type, amount, category_id, description, movement_date,
       source_key, created_at, updated_at
     )
     VALUES (
-      @id, @userId, @type, @amount, @categoryId, @description, @movementDate,
+      @id, @userId, @cycleId, @type, @amount, @categoryId, @description, @movementDate,
       @sourceKey, @createdAt, @updatedAt
     )
   `),
@@ -161,6 +295,21 @@ const statements = {
   `),
   deleteMovement: db.prepare(`DELETE FROM movements WHERE id = ? AND user_id = ?`),
 };
+
+function ensureMovementCycleColumn() {
+  const columns = db.prepare(`PRAGMA table_info(movements)`).all();
+  if (!columns.some((column) => column.name === "cycle_id")) {
+    db.exec(`ALTER TABLE movements ADD COLUMN cycle_id TEXT REFERENCES cycles(id) ON DELETE RESTRICT`);
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_movements_cycle_lookup ON movements(user_id, cycle_id, movement_date DESC)`);
+}
+
+function migrateCyclesForExistingUsers() {
+  const users = db.prepare(`SELECT id FROM users`).all();
+  for (const { id: userId } of users) {
+    ensureCurrentCycle(userId);
+  }
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -273,6 +422,16 @@ function readJsonBody(request) {
   });
 }
 
+function normalizeRequestPath(pathname) {
+  if (!appBasePath) return pathname;
+  if (pathname === appBasePath) return "/";
+  if (pathname.startsWith(`${appBasePath}/`)) {
+    const stripped = pathname.slice(appBasePath.length);
+    return stripped || "/";
+  }
+  return pathname;
+}
+
 function getSessionToken(request) {
   return parseCookies(request.headers.cookie || "")["pulso_session"] || "";
 }
@@ -383,8 +542,127 @@ function listCategoriesByUser(userId) {
   };
 }
 
-function listMovementsByUser(userId) {
-  return statements.listMovements.all(userId).map(serializeMovement);
+function serializeCycle(row) {
+  if (!row) return null;
+  const incomeTotal = Number(row.incomeTotal || 0);
+  const expenseTotal = Number(row.expenseTotal || 0);
+  return {
+    id: row.id,
+    userId: row.userId,
+    label: row.label,
+    status: row.status,
+    startedAt: row.startedAt,
+    closedAt: row.closedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    incomeTotal,
+    expenseTotal,
+    balance: incomeTotal - expenseTotal,
+    movementCount: Number(row.movementCount || 0),
+  };
+}
+
+function listMovementsByCycle(userId, cycleId) {
+  return statements.listMovementsByCycle.all(userId, cycleId).map(serializeMovement);
+}
+
+function listMovementsByCycleNoJoin(userId, cycleId) {
+  return statements.listMovementsByCycleNoJoin.all(userId, cycleId).map(serializeMovement);
+}
+
+function listCyclesByUser(userId) {
+  return statements.listCyclesByUser.all(userId).map(serializeCycle);
+}
+
+function listClosedCyclesByUser(userId) {
+  return statements.listClosedCyclesByUser.all(userId).map(serializeCycle);
+}
+
+function getCycleSummary(userId, cycleId) {
+  return serializeCycle(statements.listCycleSummaryById.get(userId, cycleId));
+}
+
+function getCurrentCycle(userId) {
+  return serializeCycle(statements.findActiveCycleByUser.get(userId));
+}
+
+function ensureCurrentCycle(userId) {
+  let cycle = statements.findActiveCycleByUser.get(userId);
+  const createdAt = nowIso();
+  if (!cycle) {
+    const earliest = db
+      .prepare(`SELECT MIN(movement_date) AS firstDate FROM movements WHERE user_id = ?`)
+      .get(userId)?.firstDate;
+    const startedAt = earliest ? new Date(`${earliest}T00:00:00`).toISOString() : createdAt;
+    const id = uuid();
+    statements.insertCycle.run({
+      id,
+      userId,
+      label: "Ciclo atual",
+      status: "active",
+      startedAt,
+      closedAt: null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    cycle = statements.findActiveCycleByUser.get(userId);
+  }
+
+  const missingMovements = db
+    .prepare(`SELECT COUNT(*) AS count FROM movements WHERE user_id = ? AND cycle_id IS NULL`)
+    .get(userId).count;
+  if (missingMovements > 0) {
+    statements.assignLegacyMovementsToCycle.run(cycle.id, userId);
+  }
+
+  return serializeCycle(cycle);
+}
+
+function formatCycleLabel(startedAt, closedAt) {
+  const formatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" });
+  const start = formatter.format(new Date(startedAt));
+  const end = formatter.format(new Date(closedAt));
+  return `${start} - ${end}`;
+}
+
+function closeCurrentCycle(userId) {
+  const activeCycle = statements.findActiveCycleByUser.get(userId);
+  if (!activeCycle) {
+    const error = new Error("active_cycle_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const closedAt = nowIso();
+  const label = formatCycleLabel(activeCycle.startedAt, closedAt);
+  const newCycleId = uuid();
+  const newStartedAt = closedAt;
+  const timestamp = nowIso();
+
+  db.exec("BEGIN");
+  try {
+    statements.updateCycleClose.run(label, closedAt, timestamp, activeCycle.id, userId);
+    statements.insertCycle.run({
+      id: newCycleId,
+      userId,
+      label: "Ciclo atual",
+      status: "active",
+      startedAt: newStartedAt,
+      closedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    closedCycle: serializeCycle(statements.findCycleById.get(activeCycle.id, userId)),
+    currentCycle: serializeCycle(statements.findActiveCycleByUser.get(userId)),
+    cycles: listCyclesByUser(userId),
+  };
 }
 
 function findCategoryForUserOrThrow(userId, categoryId) {
@@ -426,6 +704,7 @@ function ensureCategoryCapacity(userId, type, name) {
 }
 
 function upsertMovement(userId, body, existingId = null) {
+  const currentCycle = ensureCurrentCycle(userId);
   const type = body.type === "income" ? "income" : "expense";
   const amount = Number(body.amount);
   const categoryId = String(body.categoryId || "").trim();
@@ -448,8 +727,8 @@ function upsertMovement(userId, body, existingId = null) {
   }
 
   const existing = existingId
-    ? statements.findMovementById.get(existingId, userId)
-    : statements.findMovementBySource.get(userId, sourceKey);
+    ? statements.findActiveMovementById.get(existingId, userId)
+    : statements.findActiveMovementBySource.get(userId, sourceKey);
 
   const timestamp = nowIso();
   if (existing) {
@@ -460,6 +739,7 @@ function upsertMovement(userId, body, existingId = null) {
   statements.insertMovement.run({
     id: movementId,
     userId,
+    cycleId: currentCycle.id,
     type,
     amount,
     categoryId,
@@ -474,10 +754,13 @@ function upsertMovement(userId, body, existingId = null) {
 }
 
 function collectUserBootstrap(userId) {
+  const currentCycle = ensureCurrentCycle(userId);
   return {
     user: serializeUser(statements.findUserById.get(userId)),
+    currentCycle,
+    cycles: listCyclesByUser(userId),
     categories: listCategoriesByUser(userId),
-    movements: listMovementsByUser(userId),
+    movements: listMovementsByCycle(userId, currentCycle.id),
   };
 }
 
@@ -532,6 +815,7 @@ function registerUser(body, response) {
       updatedAt: createdAt,
     });
     seedDefaultCategories(userId);
+    ensureCurrentCycle(userId);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -723,13 +1007,20 @@ function handleCategories(request, response, context, pathname, method, body) {
 function handleMovements(request, response, context, pathname, method, body) {
   const userId = context.user.id;
   if (method === "GET" && pathname === "/api/movements") {
-    sendJson(response, 200, listMovementsByUser(userId));
+    const currentCycle = ensureCurrentCycle(userId);
+    sendJson(response, 200, listMovementsByCycle(userId, currentCycle.id));
     return;
   }
 
   if (method === "POST" && pathname === "/api/movements") {
     const result = upsertMovement(userId, body);
-    sendJson(response, 201, { ok: true, id: result.id, movements: listMovementsByUser(userId) });
+    const currentCycle = ensureCurrentCycle(userId);
+    sendJson(response, 201, {
+      ok: true,
+      id: result.id,
+      currentCycle,
+      movements: listMovementsByCycle(userId, currentCycle.id),
+    });
     return;
   }
 
@@ -740,21 +1031,28 @@ function handleMovements(request, response, context, pathname, method, body) {
   }
 
   const movementId = decodeURIComponent(match[1]);
-  const current = statements.findMovementById.get(movementId, userId);
+  const current = statements.findActiveMovementById.get(movementId, userId);
   if (!current) {
+    const exists = statements.findMovementById.get(movementId, userId);
+    if (exists) {
+      sendJson(response, 409, { error: "cycle_closed", message: "Lancamentos de ciclos fechados sao somente leitura." });
+      return;
+    }
     sendJson(response, 404, { error: "not_found" });
     return;
   }
 
   if (method === "PUT" || method === "PATCH") {
     upsertMovement(userId, body, movementId);
-    sendJson(response, 200, { ok: true, movements: listMovementsByUser(userId) });
+    const currentCycle = ensureCurrentCycle(userId);
+    sendJson(response, 200, { ok: true, movements: listMovementsByCycle(userId, currentCycle.id) });
     return;
   }
 
   if (method === "DELETE") {
     statements.deleteMovement.run(movementId, userId);
-    sendJson(response, 200, { ok: true, movements: listMovementsByUser(userId) });
+    const currentCycle = ensureCurrentCycle(userId);
+    sendJson(response, 200, { ok: true, movements: listMovementsByCycle(userId, currentCycle.id) });
     return;
   }
 
@@ -782,9 +1080,11 @@ function serveStatic(request, response, pathname) {
   });
 }
 
+migrateCyclesForExistingUsers();
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${host}`);
-  const pathname = url.pathname;
+  const pathname = normalizeRequestPath(url.pathname);
   const method = (request.method || "GET").toUpperCase();
 
   try {
@@ -819,6 +1119,57 @@ const server = http.createServer(async (request, response) => {
       const context = requireAuth(request, response);
       if (!context) return;
       handleBootstrap(response, context);
+      return;
+    }
+
+    if (pathname === "/api/cycles/current" && method === "GET") {
+      const context = requireAuth(request, response);
+      if (!context) return;
+      const cycle = ensureCurrentCycle(context.user.id);
+      sendJson(response, 200, {
+        cycle,
+        movements: listMovementsByCycle(context.user.id, cycle.id),
+      });
+      return;
+    }
+
+    if (pathname === "/api/cycles" && method === "GET") {
+      const context = requireAuth(request, response);
+      if (!context) return;
+      const userId = context.user.id;
+      sendJson(response, 200, {
+        currentCycle: ensureCurrentCycle(userId),
+        cycles: listCyclesByUser(userId),
+      });
+      return;
+    }
+
+    if (pathname === "/api/cycles/close" && method === "POST") {
+      const context = requireAuth(request, response);
+      if (!context) return;
+      const result = closeCurrentCycle(context.user.id);
+      sendJson(response, 200, {
+        ok: true,
+        ...result,
+        movements: listMovementsByCycle(context.user.id, result.currentCycle.id),
+      });
+      return;
+    }
+
+    const cycleMatch = pathname.match(/^\/api\/cycles\/([^/]+)$/);
+    if (cycleMatch && method === "GET") {
+      const context = requireAuth(request, response);
+      if (!context) return;
+      const cycleId = decodeURIComponent(cycleMatch[1]);
+      const cycle = statements.findCycleById.get(cycleId, context.user.id);
+      if (!cycle) {
+        sendJson(response, 404, { error: "not_found" });
+        return;
+      }
+      sendJson(response, 200, {
+        cycle: serializeCycle(statements.listCycleSummaryById.get(context.user.id, cycleId)),
+        movements: listMovementsByCycle(context.user.id, cycleId),
+      });
       return;
     }
 

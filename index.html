@@ -76,7 +76,7 @@
           <div>
             <p class="eyebrow">Pulso</p>
             <h1 id="screen-title">Seu dinheiro, sem ruído.</h1>
-            <span class="period-chip" id="screen-period">Este mês</span>
+            <span class="period-chip" id="screen-period">Ciclo ativo</span>
           </div>
           <button class="icon-button" id="reset-demo" type="button" aria-label="Restaurar dados de demonstração">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -90,9 +90,9 @@
           <section class="tab-panel active" id="tab-summary" data-title="Seu dinheiro, sem ruído.">
             <article class="balance-card">
               <div class="card-glow"></div>
-              <p>Saldo atual <span id="summary-period">este mês</span></p>
+              <p>Saldo atual <span id="summary-period">ciclo ativo</span></p>
               <strong id="current-balance">R$ 0,00</strong>
-              <span id="balance-note">Um retrato simples do mês.</span>
+              <span id="balance-note">Um retrato simples do ciclo.</span>
               <div class="pulse-line" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
             </article>
 
@@ -111,9 +111,18 @@
               <div>
                 <span class="mini-label">Comportamento</span>
                 <strong id="behavior-title">Estável</strong>
-                <p id="behavior-copy">Seu mês ainda está tomando forma.</p>
+                <p id="behavior-copy">Seu ciclo ainda está tomando forma.</p>
               </div>
               <div class="behavior-ring" id="behavior-ring"><span id="behavior-percent">0%</span></div>
+            </article>
+
+            <article class="cycle-card">
+              <div>
+                <span class="mini-label">Ciclo ativo</span>
+                <strong id="current-cycle-label">Ciclo atual</strong>
+                <p id="current-cycle-copy">Os lançamentos deste ciclo aparecem aqui.</p>
+              </div>
+              <button class="secondary-action compact" id="open-close-cycle" type="button">Fechar ciclo</button>
             </article>
 
             <div class="section-heading">
@@ -144,7 +153,7 @@
             </div>
             <article class="analysis-hero">
               <div class="analysis-copy">
-                <span class="mini-label" id="analysis-period">Análise do mês</span>
+                <span class="mini-label" id="analysis-period">Análise do ciclo</span>
                 <strong id="top-category">Sem dados</strong>
                 <p id="top-category-copy">Adicione saídas para revelar padrões.</p>
                 <div class="analysis-stats">
@@ -165,11 +174,28 @@
 
           <section class="tab-panel" id="tab-insights" data-title="Pequenos sinais, boas decisões.">
             <article class="insight-lead">
-              <span class="mini-label">Pulso do mês</span>
+              <span class="mini-label">Pulso do ciclo</span>
               <strong id="insight-headline">Seu padrão aparece aqui.</strong>
               <p id="insight-subtitle">As frases mudam automaticamente com suas movimentações.</p>
             </article>
             <div class="insight-stack large" id="insights-list"></div>
+          </section>
+
+          <section class="tab-panel" id="tab-cycles" data-title="Ciclos fechados, sem ruído.">
+            <article class="cycle-hero">
+              <div>
+                <span class="mini-label">Ciclo ativo</span>
+                <strong id="cycles-current-label">Ciclo atual</strong>
+                <p id="cycles-current-copy">Feche o ciclo manualmente quando quiser virar o período.</p>
+              </div>
+              <button class="primary-action compact" id="open-close-cycle-cta" type="button">Fechar ciclo</button>
+            </article>
+
+            <div class="section-heading">
+              <h2>Ciclos fechados</h2>
+              <span class="section-subtitle" id="closed-cycles-count">0 ciclos</span>
+            </div>
+            <div class="cycle-list" id="cycle-list"></div>
           </section>
         </section>
 
@@ -197,6 +223,10 @@
           <button class="nav-tab" type="button" data-tab="insights">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3" /><path d="M18.4 5.6 16.3 7.7" /><path d="M21 12h-3" /><path d="M6 12H3" /><path d="M7.7 7.7 5.6 5.6" /><path d="M9 18h6" /><path d="M10 21h4" /><path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" /></svg>
             <span>Insights</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="cycles">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v6h6" /><path d="M12 8v5l3 2" /></svg>
+            <span>Ciclos</span>
           </button>
         </nav>
       </section>
@@ -299,6 +329,65 @@
         </p>
         <button class="primary-action" id="import-local-data" type="button">Importar agora</button>
         <button class="secondary-action" id="skip-local-data" type="button">Agora não</button>
+      </div>
+    </section>
+
+    <section class="sheet" id="cycle-close-sheet" aria-hidden="true">
+      <div class="sheet-backdrop" data-close-cycle-sheet></div>
+      <div class="movement-form cycle-form" role="dialog" aria-modal="true" aria-labelledby="cycle-close-title">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="sheet-header">
+          <div>
+            <p class="eyebrow">Fechar ciclo</p>
+            <h2 id="cycle-close-title">Encerrar este período?</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-cycle-sheet aria-label="Fechar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
+        </div>
+        <p class="migration-copy" id="cycle-close-copy">O ciclo atual vai para o histórico e um novo ciclo vazio será aberto na sequência.</p>
+        <p class="form-note" id="cycle-close-note">Nenhum lançamento é apagado. Tudo continua salvo no histórico do usuário.</p>
+        <button class="primary-action" id="confirm-close-cycle" type="button">Fechar agora</button>
+        <button class="secondary-action" data-close-cycle-sheet type="button">Cancelar</button>
+      </div>
+    </section>
+
+    <section class="sheet" id="cycle-detail-sheet" aria-hidden="true">
+      <div class="sheet-backdrop" data-close-cycle-detail></div>
+      <div class="movement-form cycle-detail-form" role="dialog" aria-modal="true" aria-labelledby="cycle-detail-title">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="sheet-header">
+          <div>
+            <p class="eyebrow">Ciclo fechado</p>
+            <h2 id="cycle-detail-title">Detalhe do ciclo</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-cycle-detail aria-label="Fechar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
+        </div>
+        <article class="cycle-detail-summary">
+          <div>
+            <span class="mini-label">Período</span>
+            <strong id="cycle-detail-period">-</strong>
+          </div>
+          <div>
+            <span class="mini-label">Saldo</span>
+            <strong id="cycle-detail-balance">R$ 0,00</strong>
+          </div>
+          <div>
+            <span class="mini-label">Movimentos</span>
+            <strong id="cycle-detail-count">0</strong>
+          </div>
+          <div>
+            <span class="mini-label">Entradas</span>
+            <strong id="cycle-detail-income">R$ 0,00</strong>
+          </div>
+          <div>
+            <span class="mini-label">Saídas</span>
+            <strong id="cycle-detail-expense">R$ 0,00</strong>
+          </div>
+        </article>
+        <div class="movement-list cycle-detail-list" id="cycle-detail-list"></div>
       </div>
     </section>
 

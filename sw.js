@@ -1,4 +1,4 @@
-const CACHE_NAME = "pulso-pwa-v7";
+const CACHE_NAME = "pulso-pwa-v8";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -33,7 +33,13 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   const url = new URL(event.request.url);
-  if (url.origin === self.location.origin && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/"))) {
+  const scopePath = new URL(self.registration.scope).pathname.replace(/\/$/, "");
+  const apiPrefix = scopePath === "/" ? "" : scopePath;
+  const apiMatch =
+    (apiPrefix ? url.pathname.startsWith(`${apiPrefix}/api/`) : url.pathname.startsWith("/api/")) ||
+    (apiPrefix ? url.pathname.startsWith(`${apiPrefix}/auth/`) : url.pathname.startsWith("/auth/"));
+
+  if (url.origin === self.location.origin && apiMatch) {
     event.respondWith(fetch(event.request));
     return;
   }

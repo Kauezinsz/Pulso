@@ -188,6 +188,15 @@ svg {
   font-weight: 850;
 }
 
+.secondary-action.compact,
+.primary-action.compact {
+  width: fit-content;
+  min-height: 40px;
+  padding: 0 14px;
+  justify-self: end;
+  margin-top: 0;
+}
+
 .migration-form {
   display: grid;
   gap: 12px;
@@ -558,6 +567,120 @@ h2 {
   display: block;
   margin-bottom: 6px;
   font-size: 1.2rem;
+}
+
+.cycle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.018));
+}
+
+.cycle-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.08rem;
+  line-height: 1.12;
+}
+
+.cycle-card p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.cycle-card.closed {
+  align-items: flex-start;
+}
+
+.cycle-card.closed.good {
+  border-color: rgba(93, 255, 177, 0.18);
+}
+
+.cycle-card.closed.alert {
+  border-color: rgba(255, 111, 145, 0.18);
+}
+
+.cycle-card-side {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  text-align: right;
+}
+
+.cycle-card-side strong {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.cycle-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(46, 231, 255, 0.12);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(23, 58, 90, 0.82), rgba(6, 18, 32, 0.94) 62%, rgba(2, 10, 18, 0.98)),
+    radial-gradient(circle at 86% 18%, rgba(46, 231, 255, 0.08), transparent 11rem);
+  box-shadow: inset 0 0 0 1px rgba(198, 216, 232, 0.06), 0 20px 44px rgba(0, 0, 0, 0.24);
+}
+
+.cycle-hero strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.22rem;
+  line-height: 1.08;
+}
+
+.cycle-hero p {
+  max-width: 250px;
+  margin-top: 6px;
+  color: var(--soft);
+  font-size: 0.92rem;
+  line-height: 1.48;
+}
+
+.cycle-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cycle-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.cycle-detail-summary div {
+  display: grid;
+  gap: 4px;
+}
+
+.cycle-detail-summary strong {
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.cycle-detail-list {
+  margin-top: 12px;
+}
+
+.section-subtitle {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .behavior-ring,
@@ -1062,16 +1185,16 @@ h2 {
 
 .bottom-tabs {
   position: absolute;
-  left: 22px;
-  right: 22px;
+  left: 16px;
+  right: 16px;
   bottom: calc(18px + env(safe-area-inset-bottom));
   z-index: 5;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 2px;
-  padding: 4px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  padding: 3px;
   border: 1px solid rgba(165, 224, 255, 0.07);
-  border-radius: 18px;
+  border-radius: 17px;
   background: rgba(3, 10, 19, 0.52);
   backdrop-filter: blur(24px);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
@@ -1081,11 +1204,11 @@ h2 {
   display: grid;
   place-items: center;
   gap: 3px;
-  min-height: 42px;
-  border-radius: 13px;
+  min-height: 38px;
+  border-radius: 12px;
   background: transparent;
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.52rem;
   font-weight: 800;
   transition: color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
@@ -1093,6 +1216,10 @@ h2 {
 .nav-tab svg {
   width: 16px;
   height: 16px;
+}
+
+.nav-tab span {
+  white-space: nowrap;
 }
 
 .nav-tab.active {
@@ -1108,13 +1235,13 @@ h2 {
 
 .fab {
   position: absolute;
-  right: 30px;
-  bottom: calc(66px + env(safe-area-inset-bottom));
+  right: 24px;
+  bottom: calc(60px + env(safe-area-inset-bottom));
   z-index: 6;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border: 1px solid rgba(46, 231, 255, 0.24);
   border-radius: 13px;
   background: linear-gradient(145deg, rgba(8, 29, 47, 0.96), rgba(11, 47, 72, 0.94));
@@ -1196,6 +1323,17 @@ h2 {
   box-shadow: var(--shadow);
   transform: translateY(24px);
   transition: transform 0.22s ease;
+}
+
+.cycle-form,
+.cycle-detail-form {
+  display: grid;
+  gap: 12px;
+}
+
+.cycle-detail-form {
+  overflow-y: auto;
+  max-height: min(90vh, 760px);
 }
 
 .sheet.open .movement-form {

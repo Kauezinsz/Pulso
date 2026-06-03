@@ -37,6 +37,9 @@ const demoMovements = [
 const state = {
   authStatus: "loading",
   user: null,
+  currentCycle: null,
+  cycles: [],
+  cycleDetail: null,
   movements: [],
   activeTab: "summary",
   activeFilter: "all",
@@ -52,6 +55,7 @@ const state = {
   analysisType: "expense",
   activeAnalysisCategory: "",
   pendingDeleteCategory: "",
+  pendingCloseCycle: false,
   authMode: "login",
   migrationVisible: false,
 };
@@ -61,7 +65,6 @@ const $$ = (selector) => document.querySelectorAll(selector);
 
 const currency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" });
-const monthFormatter = new Intl.DateTimeFormat("pt-BR", { month: "long" });
 
 const elements = {
   authScreen: $("#auth-screen"),
@@ -76,6 +79,9 @@ const elements = {
   screenTitle: $("#screen-title"),
   screenPeriod: $("#screen-period"),
   summaryPeriod: $("#summary-period"),
+  currentCycleLabel: $("#current-cycle-label"),
+  currentCycleCopy: $("#current-cycle-copy"),
+  openCloseCycle: $("#open-close-cycle"),
   balance: $("#current-balance"),
   balanceNote: $("#balance-note"),
   income: $("#total-income"),
@@ -126,6 +132,23 @@ const elements = {
   migrationNote: $("#migration-note"),
   importLocalData: $("#import-local-data"),
   skipLocalData: $("#skip-local-data"),
+  cycleTabCurrentLabel: $("#cycles-current-label"),
+  cycleTabCurrentCopy: $("#cycles-current-copy"),
+  openCloseCycleCta: $("#open-close-cycle-cta"),
+  cycleList: $("#cycle-list"),
+  closedCyclesCount: $("#closed-cycles-count"),
+  cycleCloseSheet: $("#cycle-close-sheet"),
+  cycleCloseCopy: $("#cycle-close-copy"),
+  cycleCloseNote: $("#cycle-close-note"),
+  confirmCloseCycle: $("#confirm-close-cycle"),
+  cycleDetailSheet: $("#cycle-detail-sheet"),
+  cycleDetailTitle: $("#cycle-detail-title"),
+  cycleDetailPeriod: $("#cycle-detail-period"),
+  cycleDetailBalance: $("#cycle-detail-balance"),
+  cycleDetailCount: $("#cycle-detail-count"),
+  cycleDetailIncome: $("#cycle-detail-income"),
+  cycleDetailExpense: $("#cycle-detail-expense"),
+  cycleDetailList: $("#cycle-detail-list"),
 };
 
 init();
@@ -238,19 +261,38 @@ async function logout() {
   }
 
   state.user = null;
+  state.currentCycle = null;
+  state.cycles = [];
+  state.cycleDetail = null;
   state.movements = [];
   state.categories = cloneDefaultCategories();
   state.categoryRecords = { income: [], expense: [] };
   state.selectedCategory = "";
   state.authStatus = "guest";
+  state.pendingCloseCycle = false;
   setAuthMode("guest");
   updateAuthShell();
   setAuthTab("login");
+  closeCycleSheet();
+  closeCycleDetailSheet();
   render();
 }
 
 function setAuthMessage(message) {
   elements.authMessage.textContent = message;
+}
+
+function getAppBasePath() {
+  const { pathname } = window.location;
+  return pathname.startsWith("/pulso") ? "/pulso" : "";
+}
+
+function resolveAppUrl(path) {
+  if (!path || !path.startsWith("/")) return path;
+  const basePath = getAppBasePath();
+  if (!basePath) return path;
+  if (path === basePath || path.startsWith(`${basePath}/`)) return path;
+  return `${basePath}${path}`;
 }
 
 function authErrorMessage(error) {
@@ -268,7 +310,7 @@ function handleUnauthorizedError(error) {
 }
 
 async function apiRequest(url, options = {}) {
-  const response = await fetch(url, {
+  const response = await fetch(resolveAppUrl(url), {
     method: options.method || "GET",
     credentials: "include",
     headers: {
@@ -292,6 +334,9 @@ async function apiRequest(url, options = {}) {
 async function loadUserData() {
   const bootstrap = await apiRequest("/api/bootstrap");
   state.user = bootstrap.user;
+  state.currentCycle = bootstrap.currentCycle || null;
+  state.cycles = Array.isArray(bootstrap.cycles) ? bootstrap.cycles : [];
+  state.cycleDetail = null;
   applyCategoryPayload(bootstrap.categories);
   state.movements = normalizeMovementsPayload(bootstrap.movements);
   if (!getCategoriesForType(state.formType).includes(state.selectedCategory)) {
@@ -352,6 +397,122 @@ function dismissMigrationPrompt() {
 function closeMigrationSheet() {
   elements.migrationSheet.classList.remove("open");
   elements.migrationSheet.setAttribute("aria-hidden", "true");
+}
+
+function openCloseCycleSheet() {
+  const currentCycle = state.currentCycle;
+  if (!currentCycle) return;
+
+  const totals = getTotals();
+  elements.cycleCloseCopy.textContent = `Você vai encerrar ${formatCycleTitle(currentCycle)}. Entradas ${currency.format(totals.income)}, saídas ${currency.format(totals.expense)} e saldo ${currency.format(totals.balance)} seguem salvos no histórico.`;
+  elements.cycleCloseNote.textContent = "Nenhum lançamento é apagado. Um novo ciclo vazio será aberto em seguida.";
+  elements.cycleCloseSheet.classList.add("open");
+  elements.cycleCloseSheet.setAttribute("aria-hidden", "false");
+}
+
+function closeCycleSheet() {
+  elements.cycleCloseSheet.classList.remove("open");
+  elements.cycleCloseSheet.setAttribute("aria-hidden", "true");
+}
+
+async function confirmCloseCycle() {
+  if (state.pendingCloseCycle) return;
+
+  try {
+    state.pendingCloseCycle = true;
+    elements.confirmCloseCycle.disabled = true;
+    elements.confirmCloseCycle.textContent = "Fechando...";
+    const result = await apiRequest("/api/cycles/close", { method: "POST" });
+    await loadUserData();
+    render({ pulse: true });
+    closeCycleSheet();
+    setActiveTab("summary");
+    showToast(result?.closedCycle ? "Ciclo fechado e novo ciclo aberto" : "Ciclo fechado", "success");
+  } catch (error) {
+    if (!handleUnauthorizedError(error)) {
+      showToast(authErrorMessage(error), "neutral");
+    }
+  } finally {
+    state.pendingCloseCycle = false;
+    elements.confirmCloseCycle.disabled = false;
+    elements.confirmCloseCycle.textContent = "Fechar agora";
+  }
+}
+
+function renderCycles() {
+  const closedCycles = state.cycles.filter((cycle) => cycle.status === "closed");
+  const activeCycle = state.currentCycle;
+
+  elements.cycleTabCurrentLabel.textContent = activeCycle ? formatCycleTitle(activeCycle) : "Ciclo atual";
+  elements.cycleTabCurrentCopy.textContent = activeCycle
+    ? `Aberto em ${formatDate(activeCycle.startedAt)}. ${currency.format(getTotals().balance)} de saldo no ciclo ativo.`
+    : "Feche o ciclo atual quando quiser virar o período.";
+
+  elements.closedCyclesCount.textContent = `${closedCycles.length} ciclo${closedCycles.length === 1 ? "" : "s"}`;
+  elements.cycleList.innerHTML = closedCycles.length
+    ? closedCycles.map(renderCycleCard).join("")
+    : renderEmptyState("Nenhum ciclo fechado", "Quando você fechar o ciclo atual, ele aparece aqui em modo somente leitura.");
+
+  elements.cycleList.querySelectorAll("[data-open-cycle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void openCycleDetail(button.dataset.openCycle);
+    });
+  });
+}
+
+function renderCycleCard(cycle) {
+  const balanceTone = cycle.balance >= 0 ? "good" : "alert";
+  const period = formatCyclePeriod(cycle);
+  return `<article class="cycle-card closed ${balanceTone}">
+    <div>
+      <span class="mini-label">${cycle.status === "active" ? "Ativo" : "Fechado"}</span>
+      <strong>${escapeHtml(cycle.label || "Ciclo")}</strong>
+      <p>${escapeHtml(period)} · ${cycle.movementCount} movimento${cycle.movementCount === 1 ? "" : "s"}</p>
+    </div>
+    <div class="cycle-card-side">
+      <strong>${currency.format(cycle.balance)}</strong>
+      <button class="text-button" type="button" data-open-cycle="${cycle.id}">Abrir</button>
+    </div>
+  </article>`;
+}
+
+async function openCycleDetail(cycleId) {
+  try {
+    const payload = await apiRequest(`/api/cycles/${encodeURIComponent(cycleId)}`);
+    state.cycleDetail = {
+      cycle: payload.cycle,
+      movements: normalizeMovementsPayload(payload.movements),
+    };
+    renderCycleDetail();
+    elements.cycleDetailSheet.classList.add("open");
+    elements.cycleDetailSheet.setAttribute("aria-hidden", "false");
+  } catch (error) {
+    if (!handleUnauthorizedError(error)) {
+      showToast(authErrorMessage(error), "neutral");
+    }
+  }
+}
+
+function closeCycleDetailSheet() {
+  elements.cycleDetailSheet.classList.remove("open");
+  elements.cycleDetailSheet.setAttribute("aria-hidden", "true");
+}
+
+function renderCycleDetail() {
+  const detail = state.cycleDetail;
+  if (!detail) return;
+
+  const cycle = detail.cycle;
+  const movements = detail.movements;
+  elements.cycleDetailTitle.textContent = formatCycleTitle(cycle);
+  elements.cycleDetailPeriod.textContent = formatCyclePeriod(cycle);
+  elements.cycleDetailBalance.textContent = currency.format(cycle.balance);
+  elements.cycleDetailCount.textContent = String(cycle.movementCount || movements.length);
+  elements.cycleDetailIncome.textContent = currency.format(cycle.incomeTotal || 0);
+  elements.cycleDetailExpense.textContent = currency.format(cycle.expenseTotal || 0);
+  elements.cycleDetailList.innerHTML = renderMovementList(movements, {
+    empty: "Este ciclo não tem lançamentos.",
+  });
 }
 
 async function importLocalData() {
@@ -464,6 +625,19 @@ function bindEvents() {
 
   $("#open-form").addEventListener("click", () => openSheet());
   elements.categorySelect.addEventListener("click", openCategorySheet);
+  elements.openCloseCycle.addEventListener("click", openCloseCycleSheet);
+  elements.openCloseCycleCta.addEventListener("click", openCloseCycleSheet);
+  elements.confirmCloseCycle.addEventListener("click", () => {
+    void confirmCloseCycle();
+  });
+
+  $$("[data-close-cycle-sheet]").forEach((element) => {
+    element.addEventListener("click", closeCycleSheet);
+  });
+
+  $$("[data-close-cycle-detail]").forEach((element) => {
+    element.addEventListener("click", closeCycleDetailSheet);
+  });
 
   $$("[data-close-sheet]").forEach((element) => {
     element.addEventListener("click", closeSheet);
@@ -529,7 +703,7 @@ function setActiveTab(tab) {
   $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tab}`));
   const panel = $(`#tab-${tab}`);
   elements.screenTitle.textContent = panel.dataset.title;
-  elements.screenPeriod.textContent = tab === "history" ? "Linha do tempo" : periodLabel(tab);
+  elements.screenPeriod.textContent = periodLabel(tab);
 }
 
 function openSheet(movement = null) {
@@ -857,6 +1031,7 @@ function render(options = {}) {
   renderHistory();
   renderAnalysis(totals);
   renderInsights(totals);
+  renderCycles();
 }
 
 function renderSummary(totals, options = {}) {
@@ -864,22 +1039,30 @@ function renderSummary(totals, options = {}) {
   const degrees = Math.round(spendRatio * 360);
   const percent = Math.round(spendRatio * 100);
   const isEmpty = state.movements.length === 0;
+  const currentCycle = state.currentCycle;
+  const currentCycleLabel = currentCycle?.label || "Ciclo atual";
 
-  elements.summaryPeriod.textContent = periodLabel("summary").toLowerCase();
+  elements.summaryPeriod.textContent = currentCycle?.status === "active" ? "Ciclo ativo" : "Ciclo";
+  elements.currentCycleLabel.textContent = currentCycleLabel;
+  elements.currentCycleCopy.textContent = currentCycle
+    ? currentCycle.status === "active"
+      ? `Aberto em ${formatDate(currentCycle.startedAt)}. Nenhum lançamento é perdido ao fechar o ciclo.`
+      : `Fechado em ${formatDate(currentCycle.closedAt || currentCycle.updatedAt)}.`
+    : "Os lançamentos deste ciclo aparecem aqui.";
   elements.balance.textContent = currency.format(totals.balance);
   elements.income.textContent = currency.format(totals.income);
   elements.expense.textContent = currency.format(totals.expense);
   elements.balanceNote.textContent = isEmpty
-    ? "Comece com um gasto pequeno. O Pulso cuida do desenho."
+    ? "Comece com um lançamento e o Pulso desenha o ciclo atual."
     : totals.balance >= 0
-      ? "Você ainda está respirando bem neste mês."
-      : "O mês virou para o vermelho. Dá para corrigir cedo.";
+      ? "O ciclo ainda respira bem. Dá para seguir com calma."
+      : "O ciclo ficou no vermelho. Ainda dá para ajustar cedo.";
   elements.behaviorRing.style.background = `conic-gradient(var(--cyan) ${degrees}deg, rgba(255,255,255,.08) ${degrees}deg)`;
   elements.behaviorPercent.textContent = `${percent}%`;
 
   if (isEmpty) {
     elements.behaviorTitle.textContent = "Pronto para começar";
-    elements.behaviorCopy.textContent = "Um registro já revela o primeiro sinal.";
+    elements.behaviorCopy.textContent = "Um registro já deixa o ciclo vivo.";
   } else if (percent < 45) {
     elements.behaviorTitle.textContent = "Leve";
     elements.behaviorCopy.textContent = "As saídas ainda ocupam pouco espaço.";
@@ -892,7 +1075,7 @@ function renderSummary(totals, options = {}) {
   }
 
   elements.recentList.innerHTML = renderMovementList(sortMovements(state.movements).slice(0, 4), {
-    empty: "Seu resumo fica vivo assim que você adiciona a primeira movimentação.",
+    empty: "Seu ciclo atual fica vivo assim que você adiciona a primeira movimentação.",
   });
   elements.quickInsights.innerHTML = buildInsights(totals).slice(0, 2).map(renderInsightCard).join("");
 
@@ -909,7 +1092,7 @@ function renderHistory() {
 
   elements.historyList.innerHTML = renderMovementList(filtered, {
     withActions: true,
-    empty: "Nada neste filtro. Toque no + para registrar uma movimentação.",
+    empty: "Nenhum lançamento neste filtro do ciclo atual.",
   });
 
   elements.historyList.querySelectorAll("[data-edit]").forEach((button) => {
@@ -935,14 +1118,14 @@ function renderAnalysis(totals) {
   const typeLabel = state.analysisType === "expense" ? "saídas" : "entradas";
   const typeTitle = state.analysisType === "expense" ? "Gastos" : "Receitas";
 
-  elements.analysisPeriod.textContent = `${typeTitle} de ${monthFormatter.format(new Date())}`;
+  elements.analysisPeriod.textContent = state.currentCycle?.status === "active" ? "Ciclo ativo" : "Ciclo fechado";
   elements.analysisTotal.textContent = `${currency.format(typeTotal)} em ${typeLabel}`;
   elements.analysisCount.textContent = `${movementCount} movimento${movementCount === 1 ? "" : "s"}`;
 
   if (!top) {
     elements.topCategory.textContent = state.analysisType === "expense" ? "Sem gastos ainda" : "Sem receitas ainda";
-    elements.topCategoryCopy.textContent = `Registre ${state.analysisType === "expense" ? "uma saída" : "uma entrada"} para o Pulso desenhar a distribuição.`;
-    elements.categoryBars.innerHTML = renderEmptyState("Análise limpa", "Suas categorias aparecem aqui com peso, proporção e leitura rápida.");
+    elements.topCategoryCopy.textContent = `Registre ${state.analysisType === "expense" ? "uma saída" : "uma entrada"} para o Pulso desenhar o ciclo.`;
+    elements.categoryBars.innerHTML = renderEmptyState("Análise limpa", "As categorias aparecem aqui com peso, proporção e leitura rápida.");
     elements.categoryDonut.innerHTML = "";
     elements.donutCenter.textContent = "0%";
     return;
@@ -959,7 +1142,7 @@ function renderInsights(totals) {
   const insights = buildInsights(totals);
   const [lead, ...rest] = insights;
   elements.insightHeadline.textContent = lead?.title || "Seu padrão aparece aqui.";
-  elements.insightSubtitle.textContent = lead?.copy || "Adicione algumas movimentações para gerar leituras úteis.";
+  elements.insightSubtitle.textContent = lead?.copy || "Adicione algumas movimentações para gerar leituras úteis neste ciclo.";
   elements.insightsList.innerHTML = rest.length
     ? rest.map(renderInsightCard).join("")
     : renderEmptyState("Sem sinais extras", "Com mais registros, o Pulso compara ritmo, pequenos gastos e categorias.");
@@ -1085,7 +1268,7 @@ function buildInsights(totals) {
     insights.push({
       badge: "Maior impacto",
       tone: "impact",
-      title: `${capitalize(top.category)} está puxando o mês`,
+      title: `${capitalize(top.category)} está puxando o ciclo`,
       copy: `${currency.format(top.total)} foram para ${top.category}. É o melhor ponto para olhar primeiro.`,
     });
   }
@@ -1334,17 +1517,37 @@ function getCategoryIdByName(type, categoryName) {
 }
 
 function periodLabel(tab) {
-  const month = monthFormatter.format(new Date());
   const labels = {
-    summary: `Este mês · ${capitalize(month)}`,
-    analysis: `${capitalize(month)} · últimos 30 dias`,
-    insights: "Este mês · últimos 7 dias",
+    summary: "Ciclo ativo",
+    history: "Lançamentos do ciclo",
+    analysis: "Ciclo ativo",
+    insights: "Leituras do ciclo",
+    cycles: "Histórico de ciclos",
   };
-  return labels[tab] || `Este mês · ${capitalize(month)}`;
+  return labels[tab] || "Ciclo ativo";
 }
 
 function formatDate(date) {
-  return dateFormatter.format(new Date(`${date}T12:00:00`)).replace(".", "");
+  const parsed = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return dateFormatter.format(parsed).replace(".", "");
+}
+
+function formatCycleTitle(cycle) {
+  if (!cycle) return "Ciclo atual";
+  return cycle.status === "closed" && cycle.label ? cycle.label : "Ciclo atual";
+}
+
+function formatCyclePeriod(cycle) {
+  if (!cycle) return "Ciclo atual";
+  const started = formatDate(cycle.startedAt);
+  if (cycle.status === "closed" && cycle.closedAt) {
+    const ended = formatDate(cycle.closedAt);
+    if (started === "—" || ended === "—") return "Ciclo fechado";
+    return `${started} - ${ended}`;
+  }
+  if (started === "—") return "Ciclo atual";
+  return `Aberto em ${formatDate(cycle.startedAt)}`;
 }
 
 function offsetDate(days) {
