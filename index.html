@@ -19,6 +19,57 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <section class="auth-screen" id="auth-screen" aria-label="Acesso ao Pulso">
+      <div class="auth-shell">
+        <div class="auth-copy">
+          <p class="eyebrow">Pulso</p>
+          <h1>Entre com sua conta e leve seus dados com voce.</h1>
+          <p>
+            Um espaço simples, escuro e mobile-first para acompanhar pequenos gastos com login,
+            banco e sincronização entre aparelhos.
+          </p>
+          <div class="auth-pills" aria-hidden="true">
+            <span>Conta pessoal</span>
+            <span>Banco seguro</span>
+            <span>Sincroniza entre dispositivos</span>
+          </div>
+        </div>
+
+        <article class="auth-card">
+          <div class="auth-switch" role="tablist" aria-label="Escolha a ação">
+            <button class="auth-tab active" type="button" data-auth-tab="login">Entrar</button>
+            <button class="auth-tab" type="button" data-auth-tab="register">Criar conta</button>
+          </div>
+
+          <form class="auth-form active" id="login-form">
+            <label class="field">
+              <span>E-mail</span>
+              <input id="login-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
+            </label>
+            <label class="field">
+              <span>Senha</span>
+              <input id="login-password" type="password" autocomplete="current-password" placeholder="Sua senha" required />
+            </label>
+            <button class="primary-action" type="submit">Entrar</button>
+          </form>
+
+          <form class="auth-form" id="register-form" hidden>
+            <label class="field">
+              <span>E-mail</span>
+              <input id="register-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
+            </label>
+            <label class="field">
+              <span>Senha</span>
+              <input id="register-password" type="password" autocomplete="new-password" placeholder="Pelo menos 8 caracteres" required />
+            </label>
+            <button class="primary-action" type="submit">Criar conta</button>
+          </form>
+
+          <p class="auth-message" id="auth-message" role="alert"></p>
+        </article>
+      </div>
+    </section>
+
     <main class="app-shell">
       <section class="phone-frame" aria-label="Protótipo do app Pulso">
         <header class="topbar">
@@ -224,6 +275,30 @@
           <button class="primary-action compact" id="save-category" type="button">Salvar categoria</button>
           <p class="form-note" id="category-error" role="alert"></p>
         </div>
+      </div>
+    </section>
+
+    <section class="sheet migration-sheet" id="migration-sheet" aria-hidden="true">
+      <div class="sheet-backdrop" data-close-migration-sheet></div>
+      <div class="movement-form migration-form" role="dialog" aria-modal="true" aria-labelledby="migration-title">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="sheet-header">
+          <div>
+            <p class="eyebrow">Migração local</p>
+            <h2 id="migration-title">Importar dados deste aparelho?</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-migration-sheet aria-label="Fechar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
+        </div>
+        <p class="migration-copy" id="migration-copy">
+          Encontramos dados salvos neste aparelho. Deseja importar para sua conta?
+        </p>
+        <p class="form-note migration-note" id="migration-note">
+          Isso não apaga os dados do banco. Apenas leva o histórico local para sua conta.
+        </p>
+        <button class="primary-action" id="import-local-data" type="button">Importar agora</button>
+        <button class="secondary-action" id="skip-local-data" type="button">Agora não</button>
       </div>
     </section>
 

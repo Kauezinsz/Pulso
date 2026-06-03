@@ -1,5 +1,7 @@
 const STORAGE_KEY = "pulso.movements.v1";
 const CATEGORY_STORAGE_KEY = "pulso.categories.v1";
+const MIGRATION_FLAG_KEY = "pulso.migration.v1";
+const SKIPPED_MIGRATION_KEY = "pulso.migration.skip.v1";
 
 const categoryMeta = {
   salário: { icon: "S", color: "#5dffb1" },
@@ -33,16 +35,25 @@ const demoMovements = [
 ];
 
 const state = {
-  movements: loadMovements(),
+  authStatus: "loading",
+  user: null,
+  movements: [],
   activeTab: "summary",
   activeFilter: "all",
   formType: "expense",
   selectedCategory: "",
-  categories: loadCategories(),
+  categories: cloneDefaultCategories(),
+  categoryRecords: {
+    income: [],
+    expense: [],
+  },
   categoryEditorMode: "create",
   editingCategory: "",
   analysisType: "expense",
   activeAnalysisCategory: "",
+  pendingDeleteCategory: "",
+  authMode: "login",
+  migrationVisible: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -53,6 +64,15 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: 
 const monthFormatter = new Intl.DateTimeFormat("pt-BR", { month: "long" });
 
 const elements = {
+  authScreen: $("#auth-screen"),
+  authMessage: $("#auth-message"),
+  authTabs: $$(".auth-tab"),
+  loginForm: $("#login-form"),
+  registerForm: $("#register-form"),
+  loginEmail: $("#login-email"),
+  loginPassword: $("#login-password"),
+  registerEmail: $("#register-email"),
+  registerPassword: $("#register-password"),
   screenTitle: $("#screen-title"),
   screenPeriod: $("#screen-period"),
   summaryPeriod: $("#summary-period"),
@@ -98,17 +118,43 @@ const elements = {
   newCategoryName: $("#new-category-name"),
   saveCategory: $("#save-category"),
   categoryError: $("#category-error"),
+  logoutButton: $("#reset-demo"),
   description: $("#description"),
   date: $("#date"),
+  migrationSheet: $("#migration-sheet"),
+  migrationCopy: $("#migration-copy"),
+  migrationNote: $("#migration-note"),
+  importLocalData: $("#import-local-data"),
+  skipLocalData: $("#skip-local-data"),
 };
 
 init();
 
 function init() {
-  updateCategoryField();
   bindEvents();
   registerServiceWorker();
-  render();
+  bootApp();
+}
+
+async function bootApp() {
+  setAuthMode("loading");
+  updateAuthShell();
+
+  try {
+    const me = await apiRequest("/auth/me");
+    state.user = me.user;
+    state.authStatus = "authenticated";
+    setAuthMode("authenticated");
+    await loadUserData();
+    updateAuthShell();
+    render();
+    maybeOfferMigration();
+  } catch {
+    state.user = null;
+    state.authStatus = "guest";
+    setAuthMode("guest");
+    updateAuthShell();
+  }
 }
 
 function registerServiceWorker() {
@@ -122,7 +168,275 @@ function registerServiceWorker() {
   });
 }
 
+function setAuthMode(mode) {
+  state.authMode = mode;
+  document.body.dataset.auth = mode;
+}
+
+function updateAuthShell() {
+  if (state.authStatus === "authenticated") {
+    elements.logoutButton.hidden = false;
+    elements.logoutButton.setAttribute("aria-label", `Sair da conta${state.user?.email ? ` (${state.user.email})` : ""}`);
+    elements.logoutButton.title = state.user?.email ? `Sair de ${state.user.email}` : "Sair da conta";
+    elements.logoutButton.querySelector("svg").innerHTML = '<path d="M10 17l5-5-5-5"></path><path d="M15 12H4"></path><path d="M20 4v16"></path>';
+  } else {
+    elements.logoutButton.hidden = true;
+  }
+}
+
+function setAuthTab(tab) {
+  state.authMode = tab;
+  elements.authTabs.forEach((button) => button.classList.toggle("active", button.dataset.authTab === tab));
+  elements.loginForm.hidden = tab !== "login";
+  elements.registerForm.hidden = tab !== "register";
+  elements.loginForm.classList.toggle("active", tab === "login");
+  elements.registerForm.classList.toggle("active", tab === "register");
+  elements.authMessage.textContent = "";
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  try {
+    setAuthMessage("Entrando...");
+    await apiRequest("/auth/login", {
+      method: "POST",
+      body: {
+        email: elements.loginEmail.value,
+        password: elements.loginPassword.value,
+      },
+    });
+    await bootApp();
+    setAuthMessage("");
+  } catch (error) {
+    setAuthMessage(authErrorMessage(error));
+  }
+}
+
+async function submitRegister(event) {
+  event.preventDefault();
+  try {
+    setAuthMessage("Criando sua conta...");
+    await apiRequest("/auth/register", {
+      method: "POST",
+      body: {
+        email: elements.registerEmail.value,
+        password: elements.registerPassword.value,
+      },
+    });
+    await bootApp();
+    setAuthMessage("");
+  } catch (error) {
+    setAuthMessage(authErrorMessage(error));
+  }
+}
+
+async function logout() {
+  try {
+    await apiRequest("/auth/logout", { method: "POST" });
+  } catch {
+    // logout local continua
+  }
+
+  state.user = null;
+  state.movements = [];
+  state.categories = cloneDefaultCategories();
+  state.categoryRecords = { income: [], expense: [] };
+  state.selectedCategory = "";
+  state.authStatus = "guest";
+  setAuthMode("guest");
+  updateAuthShell();
+  setAuthTab("login");
+  render();
+}
+
+function setAuthMessage(message) {
+  elements.authMessage.textContent = message;
+}
+
+function authErrorMessage(error) {
+  if (!error) return "Nao foi possivel continuar.";
+  if (error.code === "email_in_use") return "Esse e-mail ja esta em uso.";
+  if (error.code === "invalid_credentials") return "E-mail ou senha invalidos.";
+  if (error.code === "unauthorized") return "Sua sessao expirou. Entre novamente.";
+  return error.message || "Nao foi possivel continuar.";
+}
+
+function handleUnauthorizedError(error) {
+  if (error?.code !== "unauthorized") return false;
+  void logout();
+  return true;
+}
+
+async function apiRequest(url, options = {}) {
+  const response = await fetch(url, {
+    method: options.method || "GET",
+    credentials: "include",
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) {
+    const error = new Error(payload?.message || payload?.error || response.statusText || "Request failed");
+    error.code = payload?.error || "request_failed";
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+async function loadUserData() {
+  const bootstrap = await apiRequest("/api/bootstrap");
+  state.user = bootstrap.user;
+  applyCategoryPayload(bootstrap.categories);
+  state.movements = normalizeMovementsPayload(bootstrap.movements);
+  if (!getCategoriesForType(state.formType).includes(state.selectedCategory)) {
+    state.selectedCategory = "";
+  }
+  updateCategoryField();
+}
+
+function hasLegacyLocalData() {
+  try {
+    const movements = localStorage.getItem(STORAGE_KEY);
+    const categories = localStorage.getItem(CATEGORY_STORAGE_KEY);
+    return Boolean((movements && movements !== "[]") || (categories && categories !== "{}"));
+  } catch {
+    return false;
+  }
+}
+
+function getLegacySnapshot() {
+  try {
+    const movements = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const categories = JSON.parse(localStorage.getItem(CATEGORY_STORAGE_KEY) || "{}");
+    return {
+      movements: Array.isArray(movements) ? movements : [],
+      categories: {
+        income: Array.isArray(categories.income) ? categories.income : [],
+        expense: Array.isArray(categories.expense) ? categories.expense : [],
+      },
+    };
+  } catch {
+    return { movements: [], categories: { income: [], expense: [] } };
+  }
+}
+
+function maybeOfferMigration() {
+  if (state.authStatus !== "authenticated") return;
+  if (!hasLegacyLocalData()) return;
+
+  const skipped = localStorage.getItem(SKIPPED_MIGRATION_KEY);
+  const imported = localStorage.getItem(MIGRATION_FLAG_KEY);
+  if (imported || skipped === state.user?.email) return;
+
+  state.migrationVisible = true;
+  elements.migrationCopy.textContent = "Encontramos dados salvos neste aparelho. Deseja importar para sua conta?";
+  elements.migrationNote.textContent = "Isso não apaga os dados locais de origem até a importacao concluir.";
+  elements.migrationSheet.classList.add("open");
+  elements.migrationSheet.setAttribute("aria-hidden", "false");
+}
+
+function dismissMigrationPrompt() {
+  state.migrationVisible = false;
+  if (state.user?.email) {
+    localStorage.setItem(SKIPPED_MIGRATION_KEY, state.user.email);
+  }
+  closeMigrationSheet();
+}
+
+function closeMigrationSheet() {
+  elements.migrationSheet.classList.remove("open");
+  elements.migrationSheet.setAttribute("aria-hidden", "true");
+}
+
+async function importLocalData() {
+  const snapshot = getLegacySnapshot();
+  if (!snapshot.movements.length && !snapshot.categories.income.length && !snapshot.categories.expense.length) {
+    dismissMigrationPrompt();
+    return;
+  }
+
+  try {
+    elements.importLocalData.disabled = true;
+    elements.importLocalData.textContent = "Importando...";
+    const result = await apiRequest("/api/import/local", {
+      method: "POST",
+      body: snapshot,
+    });
+
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(CATEGORY_STORAGE_KEY);
+    localStorage.setItem(MIGRATION_FLAG_KEY, state.user?.email || "1");
+    localStorage.removeItem(SKIPPED_MIGRATION_KEY);
+
+    await loadUserData();
+    render({ pulse: true });
+    showToast(`Dados importados (${result.importedMovements} lançamentos)`, "success");
+    dismissMigrationPrompt();
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showToast(authErrorMessage(error), "neutral");
+  } finally {
+    elements.importLocalData.disabled = false;
+    elements.importLocalData.textContent = "Importar agora";
+  }
+}
+
+function applyCategoryPayload(payload) {
+  const income = Array.isArray(payload?.income) ? payload.income : [];
+  const expense = Array.isArray(payload?.expense) ? payload.expense : [];
+  state.categoryRecords = {
+    income: income.map(normalizeCategoryRecord),
+    expense: expense.map(normalizeCategoryRecord),
+  };
+  state.categories = {
+    income: state.categoryRecords.income.map((item) => item.name),
+    expense: state.categoryRecords.expense.map((item) => item.name),
+  };
+}
+
+function normalizeCategoryRecord(item) {
+  return {
+    id: item.id,
+    type: item.type,
+    name: normalizeCategoryName(item.name),
+    slug: item.slug,
+    isDefault: Boolean(item.isDefault),
+  };
+}
+
+function normalizeMovementsPayload(items) {
+  return Array.isArray(items)
+    ? items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        amount: Number(item.amount),
+        categoryId: item.categoryId,
+        category: normalizeCategoryName(item.categoryName || ""),
+        description: item.description,
+        date: item.date,
+      }))
+    : [];
+}
+
 function bindEvents() {
+  elements.authTabs.forEach((button) => {
+    button.addEventListener("click", () => setAuthTab(button.dataset.authTab));
+  });
+
+  elements.loginForm.addEventListener("submit", (event) => {
+    void submitLogin(event);
+  });
+
+  elements.registerForm.addEventListener("submit", (event) => {
+    void submitRegister(event);
+  });
+
   $$(".nav-tab").forEach((button) => {
     button.addEventListener("click", () => setActiveTab(button.dataset.tab));
   });
@@ -159,6 +473,10 @@ function bindEvents() {
     element.addEventListener("click", closeCategorySheet);
   });
 
+  $$("[data-close-migration-sheet]").forEach((element) => {
+    element.addEventListener("click", dismissMigrationPrompt);
+  });
+
   $$(".toggle-option").forEach((button) => {
     button.addEventListener("click", () => setFormType(button.dataset.type));
   });
@@ -175,18 +493,26 @@ function bindEvents() {
   });
 
   elements.form.addEventListener("submit", saveMovement);
-  elements.saveCategory.addEventListener("click", saveNewCategory);
+  elements.saveCategory.addEventListener("click", () => {
+    void saveNewCategory();
+  });
   elements.newCategoryName.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      saveNewCategory();
+      void saveNewCategory();
     }
   });
 
-  $("#reset-demo").addEventListener("click", () => {
-    state.movements = demoMovements.map((movement) => ({ ...movement, id: crypto.randomUUID() }));
-    persist();
-    render({ pulse: true });
+  elements.logoutButton.addEventListener("click", () => {
+    void logout();
+  });
+
+  elements.importLocalData.addEventListener("click", () => {
+    void importLocalData();
+  });
+
+  elements.skipLocalData.addEventListener("click", () => {
+    dismissMigrationPrompt();
   });
 }
 
@@ -313,7 +639,7 @@ function renderCategoryList() {
   });
 }
 
-function saveNewCategory() {
+async function saveNewCategory() {
   const category = normalizeCategoryName(elements.newCategoryName.value);
   const categories = getCategoriesForType(state.formType);
   const isRename = state.categoryEditorMode === "rename";
@@ -329,24 +655,38 @@ function saveNewCategory() {
     return;
   }
 
-  if (isRename) {
-    state.categories[state.formType] = categories.map((item) => (sameCategory(item, originalCategory) ? category : item));
-    state.movements = state.movements.map((movement) => {
-      if (movement.type === state.formType && sameCategory(movement.category, originalCategory)) {
-        return { ...movement, category };
+  try {
+    if (isRename) {
+      const categoryId = getCategoryIdByName(state.formType, originalCategory);
+      if (!categoryId) {
+        elements.categoryError.textContent = "Nao foi possivel localizar esta categoria.";
+        return;
       }
-      return movement;
-    });
-    persist();
-  } else {
-    state.categories[state.formType] = [...categories, category];
-  }
 
-  persistCategories();
-  selectCategory(category);
-  showToast(isRename ? "Categoria renomeada" : "Categoria criada", "success");
-  closeCategoryEditor();
-  render();
+      await apiRequest(`/api/categories/${encodeURIComponent(categoryId)}`, {
+        method: "PUT",
+        body: { name: category },
+      });
+    } else {
+      await apiRequest("/api/categories", {
+        method: "POST",
+        body: {
+          type: state.formType,
+          name: category,
+        },
+      });
+    }
+
+    await loadUserData();
+    selectCategory(category);
+    showToast(isRename ? "Categoria renomeada" : "Categoria criada", "success");
+    closeCategoryEditor();
+    render();
+  } catch (error) {
+    if (!handleUnauthorizedError(error)) {
+      elements.categoryError.textContent = authErrorMessage(error);
+    }
+  }
 }
 
 function openCategoryEditor(mode, category = "") {
@@ -404,7 +744,7 @@ function confirmDeleteCategory(category) {
   }, 4200);
 }
 
-function deleteCategory(category) {
+async function deleteCategory(category) {
   if (!canDeleteCategory(category)) return;
 
   const affected = state.movements.some((movement) => movement.type === state.formType && sameCategory(movement.category, category));
@@ -414,19 +754,29 @@ function deleteCategory(category) {
     return;
   }
 
-  state.categories[state.formType] = getCategoriesForType(state.formType).filter((item) => !sameCategory(item, category));
+  const categoryId = getCategoryIdByName(state.formType, category);
+  if (!categoryId) return;
 
-  if (sameCategory(state.selectedCategory, category)) {
-    selectCategory("outros");
+  try {
+    await apiRequest(`/api/categories/${encodeURIComponent(categoryId)}`, { method: "DELETE" });
+    await loadUserData();
+    if (sameCategory(state.selectedCategory, category)) {
+      selectCategory("outros");
+    }
+    state.pendingDeleteCategory = "";
+    closeCategoryEditor();
+    render();
+    showToast("Categoria removida", "neutral");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    if (error.code === "category_in_use") {
+      state.pendingDeleteCategory = "";
+      showCategoryFeedback("Há lançamentos utilizando esta categoria. Para excluí-la, altere ou remova esses lançamentos primeiro.");
+      showToast("Há lançamentos utilizando esta categoria.", "neutral");
+      return;
+    }
+    showCategoryFeedback(authErrorMessage(error));
   }
-
-  state.pendingDeleteCategory = "";
-  persist();
-  persistCategories();
-  closeCategoryEditor();
-  renderCategoryList();
-  render();
-  showToast("Categoria removida", "neutral");
 }
 
 function showCategoryFeedback(message) {
@@ -435,15 +785,18 @@ function showCategoryFeedback(message) {
   requestAnimationFrame(() => elements.categoryFeedback.classList.add("show"));
 }
 
-function saveMovement(event) {
+async function saveMovement(event) {
   event.preventDefault();
   const isEditing = Boolean(elements.movementId.value);
+  const categoryName = elements.category.value || state.selectedCategory;
+  const categoryId = getCategoryIdByName(state.formType, categoryName);
 
   const movement = {
     id: elements.movementId.value || crypto.randomUUID(),
     type: state.formType,
     amount: parseMoney(elements.amount.value),
-    category: elements.category.value || state.selectedCategory,
+    category: categoryName,
+    categoryId,
     description: elements.description.value.trim(),
     date: elements.date.value,
   };
@@ -452,34 +805,49 @@ function saveMovement(event) {
     return;
   }
 
-  if (!movement.category) {
+  if (!movement.category || !movement.categoryId) {
     showToast("Escolha uma categoria", "neutral");
     openCategorySheet();
     return;
   }
 
-  const existingIndex = state.movements.findIndex((item) => item.id === movement.id);
-  if (existingIndex >= 0) {
-    state.movements[existingIndex] = movement;
-  } else {
-    state.movements.unshift(movement);
-  }
+  try {
+    if (isEditing) {
+      await apiRequest(`/api/movements/${encodeURIComponent(movement.id)}`, {
+        method: "PUT",
+        body: movement,
+      });
+    } else {
+      await apiRequest("/api/movements", {
+        method: "POST",
+        body: movement,
+      });
+    }
 
-  persist();
-  closeSheet();
-  render({ pulse: true });
-  showToast(isEditing ? "Movimentação atualizada" : movement.type === "income" ? "Entrada salva" : "Saída salva", "success");
+    await loadUserData();
+    closeSheet();
+    render({ pulse: true });
+    showToast(isEditing ? "Movimentação atualizada" : movement.type === "income" ? "Entrada salva" : "Saída salva", "success");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showToast(authErrorMessage(error), "neutral");
+  }
 }
 
-function deleteMovement(id, element) {
+async function deleteMovement(id, element) {
   if (element) {
     element.classList.add("removing");
   }
-  setTimeout(() => {
-    state.movements = state.movements.filter((movement) => movement.id !== id);
-    persist();
-    render({ pulse: true });
-    showToast("Movimentação excluída", "neutral");
+  setTimeout(async () => {
+    try {
+      await apiRequest(`/api/movements/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await loadUserData();
+      render({ pulse: true });
+      showToast("Movimentação excluída", "neutral");
+    } catch (error) {
+      if (handleUnauthorizedError(error)) return;
+      showToast(authErrorMessage(error), "neutral");
+    }
   }, element ? 180 : 0);
 }
 
@@ -605,7 +973,8 @@ function renderMovementList(movements, options = {}) {
   return movements
     .map((movement) => {
       const signal = movement.type === "income" ? "+" : "-";
-      const meta = getCategoryMeta(movement.category);
+      const categoryName = movement.category || getCategoryNameById(movement.categoryId);
+      const meta = getCategoryMeta(categoryName);
       const actions = options.withActions
         ? `<details class="row-actions">
             <summary aria-label="Ações de ${escapeHtml(movement.description)}">
@@ -622,7 +991,7 @@ function renderMovementList(movements, options = {}) {
         <div class="movement-icon">${meta.icon}</div>
         <div class="movement-main">
           <strong>${escapeHtml(movement.description)}</strong>
-          <span>${capitalize(movement.category)} · ${formatDate(movement.date)}</span>
+          <span>${capitalize(categoryName)} · ${formatDate(movement.date)}</span>
         </div>
         <div class="movement-side">
           <span class="movement-value">${signal}${currency.format(movement.amount)}</span>
@@ -826,10 +1195,11 @@ function groupMovementsByCategory(type) {
   state.movements
     .filter((movement) => movement.type === type)
     .forEach((movement) => {
-      const current = map.get(movement.category) || { category: movement.category, total: 0, count: 0 };
+      const category = movement.category || getCategoryNameById(movement.categoryId);
+      const current = map.get(category) || { category, total: 0, count: 0 };
       current.total += movement.amount;
       current.count += 1;
-      map.set(movement.category, current);
+      map.set(category, current);
     });
 
   return [...map.values()].sort((a, b) => b.total - a.total);
@@ -916,41 +1286,6 @@ function sortMovements(movements) {
   return [...movements].sort((a, b) => new Date(`${b.date}T12:00:00`) - new Date(`${a.date}T12:00:00`));
 }
 
-function loadMovements() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return demoMovements;
-
-  try {
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed : demoMovements;
-  } catch {
-    return demoMovements;
-  }
-}
-
-function loadCategories() {
-  const stored = localStorage.getItem(CATEGORY_STORAGE_KEY);
-  if (!stored) return cloneDefaultCategories();
-
-  try {
-    const parsed = JSON.parse(stored);
-    return {
-      income: normalizeCategoryList(parsed.income, defaultCategoriesByType.income),
-      expense: normalizeCategoryList(parsed.expense, defaultCategoriesByType.expense),
-    };
-  } catch {
-    return cloneDefaultCategories();
-  }
-}
-
-function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.movements));
-}
-
-function persistCategories() {
-  localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(state.categories));
-}
-
 function getCategoriesForType(type) {
   return state.categories[type] || defaultCategoriesByType[type];
 }
@@ -960,38 +1295,11 @@ function canDeleteCategory(category) {
 }
 
 function isDefaultCategory(type, category) {
-  return defaultCategoriesByType[type].some((item) => sameCategory(item, category));
+  return getCategoryRecord(type, category)?.isDefault || false;
 }
 
 function isCustomCategory(type, category) {
-  return !isDefaultCategory(type, category) && getCategoriesForType(type).some((item) => sameCategory(item, category));
-}
-
-function mergeCategories(defaults, saved = []) {
-  return [...defaults, ...saved].reduce((categories, category) => {
-    const normalized = normalizeCategoryName(category);
-    if (normalized && !categories.some((item) => sameCategory(item, normalized))) {
-      categories.push(normalized);
-    }
-    return categories;
-  }, []);
-}
-
-function normalizeCategoryList(saved, fallback) {
-  const source = Array.isArray(saved) && saved.length ? saved : fallback;
-  const categories = source.reduce((items, category) => {
-    const normalized = normalizeCategoryName(category);
-    if (normalized && !items.some((item) => sameCategory(item, normalized))) {
-      items.push(normalized);
-    }
-    return items;
-  }, []);
-
-  if (!categories.some((category) => sameCategory(category, "outros"))) {
-    categories.push("outros");
-  }
-
-  return categories;
+  return Boolean(getCategoryRecord(type, category) && !getCategoryRecord(type, category).isDefault);
 }
 
 function cloneDefaultCategories() {
@@ -1007,6 +1315,22 @@ function normalizeCategoryName(value) {
 
 function sameCategory(left, right) {
   return String(left || "").toLocaleLowerCase("pt-BR") === String(right || "").toLocaleLowerCase("pt-BR");
+}
+
+function getCategoryRecord(type, categoryName) {
+  return (state.categoryRecords[type] || []).find((item) => sameCategory(item.name, categoryName));
+}
+
+function getCategoryNameById(categoryId) {
+  for (const type of ["income", "expense"]) {
+    const record = (state.categoryRecords[type] || []).find((item) => item.id === categoryId);
+    if (record) return record.name;
+  }
+  return "outros";
+}
+
+function getCategoryIdByName(type, categoryName) {
+  return getCategoryRecord(type, categoryName)?.id || "";
 }
 
 function periodLabel(tab) {

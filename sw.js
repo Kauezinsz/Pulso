@@ -1,4 +1,4 @@
-const CACHE_NAME = "pulso-pwa-v6";
+const CACHE_NAME = "pulso-pwa-v7";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -32,18 +32,23 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
+  const url = new URL(event.request.url);
+  if (url.origin === self.location.origin && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/"))) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request)
-          .then((response) => {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-            return response;
-          })
-          .catch(() => caches.match("./index.html"))
-      );
-    }),
+    fetch(event.request)
+      .then((response) => {
+        if (event.request.mode === "navigate" || event.request.destination === "style" || event.request.destination === "script" || event.request.destination === "image") {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() => {
+        return caches.match(event.request).then((cached) => cached || caches.match("./index.html"));
+      }),
   );
 });
