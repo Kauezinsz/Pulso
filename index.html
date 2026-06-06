@@ -72,6 +72,7 @@
 
     <main class="app-shell">
       <section class="phone-frame" aria-label="Protótipo do app Pulso">
+        <aside class="desktop-sidebar">
         <header class="topbar">
           <div>
             <p class="eyebrow">Pulso</p>
@@ -85,6 +86,31 @@
             </svg>
           </button>
         </header>
+
+          <nav class="bottom-tabs" aria-label="Abas principais">
+            <button class="nav-tab active" type="button" data-tab="summary">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 12 5l8 7.5" /><path d="M6.5 11.5V20h11v-8.5" /></svg>
+              <span>Resumo</span>
+            </button>
+            <button class="nav-tab" type="button" data-tab="history">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12" /><path d="M8 12h12" /><path d="M8 18h12" /><path d="M4 6h.01" /><path d="M4 12h.01" /><path d="M4 18h.01" /></svg>
+              <span>HistÃ³rico</span>
+            </button>
+            <button class="nav-tab" type="button" data-tab="analysis">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-4" /><path d="M12 16V8" /><path d="M16 16v-6" /></svg>
+              <span>AnÃ¡lise</span>
+            </button>
+            <button class="nav-tab" type="button" data-tab="insights">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3" /><path d="M18.4 5.6 16.3 7.7" /><path d="M21 12h-3" /><path d="M6 12H3" /><path d="M7.7 7.7 5.6 5.6" /><path d="M9 18h6" /><path d="M10 21h4" /><path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" /></svg>
+              <span>Insights</span>
+            </button>
+            <button class="nav-tab" type="button" data-tab="cycles">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v6h6" /><path d="M12 8v5l3 2" /></svg>
+              <span>Ciclos</span>
+            </button>
+          </nav>
+
+        </aside>
 
         <section class="content-area">
           <section class="tab-panel active" id="tab-summary" data-title="Seu dinheiro, sem ruído.">
@@ -207,28 +233,8 @@
         </button>
         <div class="save-toast" id="save-toast" role="status" aria-live="polite">Movimentação salva</div>
 
-        <nav class="bottom-tabs" aria-label="Abas principais">
-          <button class="nav-tab active" type="button" data-tab="summary">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 12 5l8 7.5" /><path d="M6.5 11.5V20h11v-8.5" /></svg>
-            <span>Resumo</span>
-          </button>
-          <button class="nav-tab" type="button" data-tab="history">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12" /><path d="M8 12h12" /><path d="M8 18h12" /><path d="M4 6h.01" /><path d="M4 12h.01" /><path d="M4 18h.01" /></svg>
-            <span>Histórico</span>
-          </button>
-          <button class="nav-tab" type="button" data-tab="analysis">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-4" /><path d="M12 16V8" /><path d="M16 16v-6" /></svg>
-            <span>Análise</span>
-          </button>
-          <button class="nav-tab" type="button" data-tab="insights">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3" /><path d="M18.4 5.6 16.3 7.7" /><path d="M21 12h-3" /><path d="M6 12H3" /><path d="M7.7 7.7 5.6 5.6" /><path d="M9 18h6" /><path d="M10 21h4" /><path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" /></svg>
-            <span>Insights</span>
-          </button>
-          <button class="nav-tab" type="button" data-tab="cycles">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v6h6" /><path d="M12 8v5l3 2" /></svg>
-            <span>Ciclos</span>
-          </button>
-        </nav>
+
+
       </section>
     </main>
 
@@ -394,3 +400,4 @@
     <script src="./app.js"></script>
   </body>
 </html>
+

@@ -156,7 +156,6 @@ init();
 function init() {
   bindViewportContext();
   bindEvents();
-  syncActiveTabContext(state.activeTab);
   registerServiceWorker();
   bootApp();
 }
@@ -744,17 +743,11 @@ function updateCategoryField() {
 
 function setActiveTab(tab) {
   state.activeTab = tab;
-  syncActiveTabContext(tab);
   $$(".nav-tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tab}`));
   const panel = $(`#tab-${tab}`);
   elements.screenTitle.textContent = panel.dataset.title;
   elements.screenPeriod.textContent = periodLabel(tab);
-}
-
-function syncActiveTabContext(tab) {
-  if (!document.body) return;
-  document.body.dataset.activeTab = tab;
 }
 
 function openSheet(movement = null) {
