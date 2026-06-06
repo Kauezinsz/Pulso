@@ -154,9 +154,54 @@ const elements = {
 init();
 
 function init() {
+  bindViewportContext();
   bindEvents();
+  syncActiveTabContext(state.activeTab);
   registerServiceWorker();
   bootApp();
+}
+
+function bindViewportContext() {
+  const standaloneQuery = window.matchMedia("(display-mode: standalone)");
+  const hoverQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+
+  const update = () => syncViewportContext();
+  window.addEventListener("resize", update, { passive: true });
+  window.addEventListener("orientationchange", update, { passive: true });
+
+  if (typeof standaloneQuery.addEventListener === "function") {
+    standaloneQuery.addEventListener("change", update);
+  } else if (typeof standaloneQuery.addListener === "function") {
+    standaloneQuery.addListener(update);
+  }
+
+  if (typeof hoverQuery.addEventListener === "function") {
+    hoverQuery.addEventListener("change", update);
+  } else if (typeof hoverQuery.addListener === "function") {
+    hoverQuery.addListener(update);
+  }
+
+  syncViewportContext();
+}
+
+function syncViewportContext() {
+  if (!document.body) return;
+
+  const width = window.innerWidth;
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  const isDesktop = width >= 1180;
+  const isTablet = width >= 860 && width < 1180;
+  const isMobile = width < 860;
+  const hasHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  document.body.classList.toggle("is-pwa", isStandalone);
+  document.body.classList.toggle("is-browser", !isStandalone);
+  document.body.classList.toggle("is-mobile", isMobile);
+  document.body.classList.toggle("is-tablet", isTablet);
+  document.body.classList.toggle("is-desktop", isDesktop);
+  document.body.classList.toggle("has-hover", hasHover);
+  document.body.dataset.context = isStandalone ? "pwa" : "browser";
+  document.body.dataset.viewport = isDesktop ? "desktop" : isTablet ? "tablet" : "mobile";
 }
 
 async function bootApp() {
@@ -699,11 +744,17 @@ function updateCategoryField() {
 
 function setActiveTab(tab) {
   state.activeTab = tab;
+  syncActiveTabContext(tab);
   $$(".nav-tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tab}`));
   const panel = $(`#tab-${tab}`);
   elements.screenTitle.textContent = panel.dataset.title;
   elements.screenPeriod.textContent = periodLabel(tab);
+}
+
+function syncActiveTabContext(tab) {
+  if (!document.body) return;
+  document.body.dataset.activeTab = tab;
 }
 
 function openSheet(movement = null) {
