@@ -1025,6 +1025,28 @@ h2 {
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.018));
 }
 
+.category-row.expanded {
+  border-color: color-mix(in srgb, var(--category-color) 24%, var(--line-soft));
+  box-shadow: 0 16px 34px rgba(2, 13, 24, 0.16);
+}
+
+.category-row-toggle {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.category-row-toggle:focus-visible {
+  outline: 2px solid rgba(46, 231, 255, 0.4);
+  outline-offset: 4px;
+  border-radius: 14px;
+}
+
 .category-meta,
 .category-values {
   display: flex;
@@ -1037,6 +1059,28 @@ h2 {
   margin-top: 10px;
   color: var(--soft);
   font-size: 0.82rem;
+}
+
+.category-expand {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(198, 216, 232, 0.08);
+}
+
+.category-expand-list {
+  display: grid;
+  gap: 8px;
+}
+
+.category-expand-empty {
+  margin-top: 4px;
+}
+
+.category-expand .movement-item {
+  min-height: 78px;
+  padding: 12px 13px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.026);
 }
 
 .category-meta span {
@@ -1671,6 +1715,14 @@ body.has-hover .secondary-action:hover,
 body.has-hover .text-button:hover,
 body.has-hover .row-actions button:hover {
   transform: translateY(-1px);
+}
+
+body.has-hover .category-row-toggle:hover {
+  transform: none;
+}
+
+body.has-hover .category-row:hover {
+  border-color: color-mix(in srgb, var(--category-color) 20%, var(--line-soft));
 }
 
 body.has-hover .nav-tab:hover {

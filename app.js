@@ -667,6 +667,15 @@ function bindEvents() {
     });
   });
 
+  elements.categoryBars.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-category-toggle]");
+    if (!button) return;
+    const category = button.dataset.categoryToggle;
+    if (!category) return;
+    state.activeAnalysisCategory = sameCategory(state.activeAnalysisCategory, category) ? "" : category;
+    renderAnalysis(getTotals());
+  });
+
   $("#open-form").addEventListener("click", () => openSheet());
   elements.categorySelect.addEventListener("click", openCategorySheet);
   elements.openCloseCycle.addEventListener("click", openCloseCycleSheet);
@@ -1175,11 +1184,12 @@ function renderAnalysis(totals) {
     return;
   }
 
-  const active = grouped.find((item) => item.category === state.activeAnalysisCategory) || top;
-  state.activeAnalysisCategory = active.category;
-  updateAnalysisFocus(active, typeTotal);
-  elements.categoryBars.innerHTML = grouped.map((item) => renderCategoryRow(item, typeTotal)).join("");
-  renderPieChart(grouped, typeTotal);
+  const active = grouped.find((item) => sameCategory(item.category, state.activeAnalysisCategory)) || null;
+  const focused = active || top;
+  const movementLabel = state.analysisType === "expense" ? "saídas" : "entradas";
+  updateAnalysisFocus(focused, typeTotal);
+  elements.categoryBars.innerHTML = grouped.map((item) => renderCategoryRow(item, typeTotal, movementLabel, sameCategory(item.category, state.activeAnalysisCategory))).join("");
+  renderPieChart(grouped, typeTotal, focused.category);
 }
 
 function renderInsights(totals) {
@@ -1229,30 +1239,34 @@ function renderMovementList(movements, options = {}) {
     .join("");
 }
 
-function renderCategoryRow(item, total) {
+function renderCategoryRow(item, total, movementLabel, expanded = false) {
   const share = Math.round((item.total / total) * 100);
   const meta = getCategoryMeta(item.category);
-  return `<article class="category-row" style="--category-color:${meta.color}">
-    <div class="category-meta">
-      <span><i>${meta.icon}</i>${capitalize(item.category)}</span>
-      <strong>${currency.format(item.total)}</strong>
-    </div>
-    <div class="bar-track"><div class="bar-fill" style="width:${share}%"></div></div>
-    <div class="category-values">
-      <span>${share}% das saídas</span>
-      <span>${item.count} movimento${item.count === 1 ? "" : "s"}</span>
-    </div>
+  const movements = expanded ? renderAnalysisMovements(item.category) : "";
+  return `<article class="category-row ${expanded ? "expanded" : ""}" style="--category-color:${meta.color}">
+    <button class="category-row-toggle" type="button" data-category-toggle="${escapeHtml(item.category)}" aria-expanded="${expanded}">
+      <div class="category-meta">
+        <span><i>${meta.icon}</i>${capitalize(item.category)}</span>
+        <strong>${currency.format(item.total)}</strong>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width:${share}%"></div></div>
+      <div class="category-values">
+        <span>${share}% das ${movementLabel}</span>
+        <span>${item.count} movimento${item.count === 1 ? "" : "s"}</span>
+      </div>
+    </button>
+    ${movements ? `<div class="category-expand" aria-label="Movimentações de ${escapeHtml(item.category)}">${movements}</div>` : ""}
   </article>`;
 }
 
-function renderPieChart(grouped, total) {
+function renderPieChart(grouped, total, focusedCategory = "") {
   let startAngle = -90;
   elements.categoryDonut.innerHTML = `<svg viewBox="0 0 120 120" role="img" aria-label="Distribuição por categoria">
     ${grouped
       .map((item, index) => {
         const angle = (item.total / total) * 360;
         const endAngle = startAngle + angle;
-        const selected = item.category === state.activeAnalysisCategory;
+        const selected = sameCategory(item.category, focusedCategory);
         const color = getCategoryColor(item.category, index);
         const path = describeDonutSlice(60, 60, 52, 34, startAngle, endAngle);
         startAngle = endAngle;
@@ -1265,14 +1279,23 @@ function renderPieChart(grouped, total) {
     const activate = () => {
       const item = grouped.find((entry) => entry.category === slice.dataset.category);
       if (!item) return;
-      state.activeAnalysisCategory = item.category;
-      updateAnalysisFocus(item, total);
-      elements.categoryDonut.querySelectorAll(".pie-slice").forEach((entry) => entry.classList.toggle("active", entry === slice));
+      state.activeAnalysisCategory = sameCategory(state.activeAnalysisCategory, item.category) ? "" : item.category;
+      renderAnalysis(getTotals());
     };
     slice.addEventListener("pointerenter", activate);
     slice.addEventListener("click", activate);
-    slice.addEventListener("touchstart", activate, { passive: true });
   });
+}
+
+function renderAnalysisMovements(category) {
+  const movements = sortMovements(state.movements).filter((movement) => movement.type === state.analysisType && sameCategory(movement.category || getCategoryNameById(movement.categoryId), category));
+  if (!movements.length) {
+    return `<div class="category-expand-empty">${renderEmptyState("Sem movimentações", "Esta categoria ainda não tem lançamentos neste ciclo.")}</div>`;
+  }
+
+  return `<div class="category-expand-list">${renderMovementList(movements, {
+    empty: "Sem movimentações",
+  })}</div>`;
 }
 
 function updateAnalysisFocus(item, total) {
