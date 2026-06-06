@@ -1,78 +1,82 @@
 <!doctype html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Pulso</title>
-    <meta name="description" content="Finanças pessoais simples para entender pequenos gastos do dia a dia." />
-    <meta name="theme-color" content="#06172a" />
-    <meta name="background-color" content="#020912" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Pulso" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png" />
-    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <section class="auth-screen" id="auth-screen" aria-label="Acesso ao Pulso">
-      <div class="auth-shell">
-        <div class="auth-copy">
-          <p class="eyebrow">Pulso</p>
-          <h1>Entre com sua conta e leve seus dados com voce.</h1>
-          <p>
-            Um espaço simples, escuro e mobile-first para acompanhar pequenos gastos com login,
-            banco e sincronização entre aparelhos.
-          </p>
-          <div class="auth-pills" aria-hidden="true">
-            <span>Conta pessoal</span>
-            <span>Banco seguro</span>
-            <span>Sincroniza entre dispositivos</span>
-          </div>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Pulso</title>
+  <meta name="description" content="Finanças pessoais simples para entender pequenos gastos do dia a dia." />
+  <meta name="theme-color" content="#06172a" />
+  <meta name="background-color" content="#020912" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Pulso" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+  <section class="auth-screen" id="auth-screen" aria-label="Acesso ao Pulso">
+    <div class="auth-shell">
+      <div class="auth-copy">
+        <p class="eyebrow">Pulso</p>
+        <h1>Entre com sua conta e leve seus dados com voce.</h1>
+        <p>
+          Um espaço simples, escuro e mobile-first para acompanhar pequenos gastos com login,
+          banco e sincronização entre aparelhos.
+        </p>
+        <div class="auth-pills" aria-hidden="true">
+          <span>Conta pessoal</span>
+          <span>Banco seguro</span>
+          <span>Sincroniza entre dispositivos</span>
+        </div>
+      </div>
+
+      <article class="auth-card">
+        <div class="auth-switch" role="tablist" aria-label="Escolha a ação">
+          <button class="auth-tab active" type="button" data-auth-tab="login">Entrar</button>
+          <button class="auth-tab" type="button" data-auth-tab="register">Criar conta</button>
         </div>
 
-        <article class="auth-card">
-          <div class="auth-switch" role="tablist" aria-label="Escolha a ação">
-            <button class="auth-tab active" type="button" data-auth-tab="login">Entrar</button>
-            <button class="auth-tab" type="button" data-auth-tab="register">Criar conta</button>
-          </div>
+        <form class="auth-form active" id="login-form">
+          <label class="field">
+            <span>E-mail</span>
+            <input id="login-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
+          </label>
+          <label class="field">
+            <span>Senha</span>
+            <input id="login-password" type="password" autocomplete="current-password" placeholder="Sua senha"
+              required />
+          </label>
+          <button class="primary-action" type="submit">Entrar</button>
+        </form>
 
-          <form class="auth-form active" id="login-form">
-            <label class="field">
-              <span>E-mail</span>
-              <input id="login-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
-            </label>
-            <label class="field">
-              <span>Senha</span>
-              <input id="login-password" type="password" autocomplete="current-password" placeholder="Sua senha" required />
-            </label>
-            <button class="primary-action" type="submit">Entrar</button>
-          </form>
+        <form class="auth-form" id="register-form" hidden>
+          <label class="field">
+            <span>E-mail</span>
+            <input id="register-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
+          </label>
+          <label class="field">
+            <span>Senha</span>
+            <input id="register-password" type="password" autocomplete="new-password"
+              placeholder="Pelo menos 8 caracteres" required />
+          </label>
+          <button class="primary-action" type="submit">Criar conta</button>
+        </form>
 
-          <form class="auth-form" id="register-form" hidden>
-            <label class="field">
-              <span>E-mail</span>
-              <input id="register-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
-            </label>
-            <label class="field">
-              <span>Senha</span>
-              <input id="register-password" type="password" autocomplete="new-password" placeholder="Pelo menos 8 caracteres" required />
-            </label>
-            <button class="primary-action" type="submit">Criar conta</button>
-          </form>
+        <p class="auth-message" id="auth-message" role="alert"></p>
+      </article>
+    </div>
+  </section>
 
-          <p class="auth-message" id="auth-message" role="alert"></p>
-        </article>
-      </div>
-    </section>
-
-    <main class="app-shell">
-      <section class="phone-frame" aria-label="Protótipo do app Pulso">
-        <aside class="desktop-sidebar">
+  <main class="app-shell">
+    <section class="phone-frame" aria-label="Protótipo do app Pulso">
+      <aside class="desktop-sidebar">
         <header class="topbar">
           <div>
             <p class="eyebrow">Pulso</p>
@@ -87,317 +91,365 @@
           </button>
         </header>
 
-          <nav class="bottom-tabs" aria-label="Abas principais">
-            <button class="nav-tab active" type="button" data-tab="summary">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 12 5l8 7.5" /><path d="M6.5 11.5V20h11v-8.5" /></svg>
-              <span>Resumo</span>
-            </button>
-            <button class="nav-tab" type="button" data-tab="history">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12" /><path d="M8 12h12" /><path d="M8 18h12" /><path d="M4 6h.01" /><path d="M4 12h.01" /><path d="M4 18h.01" /></svg>
-              <span>HistÃ³rico</span>
-            </button>
-            <button class="nav-tab" type="button" data-tab="analysis">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 16v-4" /><path d="M12 16V8" /><path d="M16 16v-6" /></svg>
-              <span>AnÃ¡lise</span>
-            </button>
-            <button class="nav-tab" type="button" data-tab="insights">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3" /><path d="M18.4 5.6 16.3 7.7" /><path d="M21 12h-3" /><path d="M6 12H3" /><path d="M7.7 7.7 5.6 5.6" /><path d="M9 18h6" /><path d="M10 21h4" /><path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" /></svg>
-              <span>Insights</span>
-            </button>
-            <button class="nav-tab" type="button" data-tab="cycles">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v6h6" /><path d="M12 8v5l3 2" /></svg>
-              <span>Ciclos</span>
-            </button>
-          </nav>
+        <nav class="bottom-tabs" aria-label="Abas principais">
+          <button class="nav-tab active" type="button" data-tab="summary">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 12.5 12 5l8 7.5" />
+              <path d="M6.5 11.5V20h11v-8.5" />
+            </svg>
+            <span>Resumo</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="history">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 6h12" />
+              <path d="M8 12h12" />
+              <path d="M8 18h12" />
+              <path d="M4 6h.01" />
+              <path d="M4 12h.01" />
+              <path d="M4 18h.01" />
+            </svg>
+            <span>Histórico</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="analysis">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 19V5" />
+              <path d="M4 19h16" />
+              <path d="M8 16v-4" />
+              <path d="M12 16V8" />
+              <path d="M16 16v-6" />
+            </svg>
+            <span>Análise</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="insights">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v3" />
+              <path d="M18.4 5.6 16.3 7.7" />
+              <path d="M21 12h-3" />
+              <path d="M6 12H3" />
+              <path d="M7.7 7.7 5.6 5.6" />
+              <path d="M9 18h6" />
+              <path d="M10 21h4" />
+              <path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" />
+            </svg>
+            <span>Insights</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="cycles">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v6h6" />
+              <path d="M12 8v5l3 2" />
+            </svg>
+            <span>Ciclos</span>
+          </button>
+        </nav>
 
-        </aside>
+      </aside>
 
-        <section class="content-area">
-          <section class="tab-panel active" id="tab-summary" data-title="Seu dinheiro, sem ruído.">
-            <article class="balance-card">
-              <div class="card-glow"></div>
-              <p>Saldo atual <span id="summary-period">ciclo ativo</span></p>
-              <strong id="current-balance">R$ 0,00</strong>
-              <span id="balance-note">Um retrato simples do ciclo.</span>
-              <div class="pulse-line" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <section class="content-area">
+        <section class="tab-panel active" id="tab-summary" data-title="Seu dinheiro, sem ruído.">
+          <article class="balance-card">
+            <div class="card-glow"></div>
+            <p>Saldo atual <span id="summary-period">ciclo ativo</span></p>
+            <strong id="current-balance">R$ 0,00</strong>
+            <span id="balance-note">Um retrato simples do ciclo.</span>
+            <div class="pulse-line" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          </article>
+
+          <div class="metric-grid">
+            <article class="metric-card income">
+              <span>Entradas</span>
+              <strong id="total-income">R$ 0,00</strong>
             </article>
-
-            <div class="metric-grid">
-              <article class="metric-card income">
-                <span>Entradas</span>
-                <strong id="total-income">R$ 0,00</strong>
-              </article>
-              <article class="metric-card expense">
-                <span>Saídas</span>
-                <strong id="total-expense">R$ 0,00</strong>
-              </article>
-            </div>
-
-            <article class="behavior-card">
-              <div>
-                <span class="mini-label">Comportamento</span>
-                <strong id="behavior-title">Estável</strong>
-                <p id="behavior-copy">Seu ciclo ainda está tomando forma.</p>
-              </div>
-              <div class="behavior-ring" id="behavior-ring"><span id="behavior-percent">0%</span></div>
+            <article class="metric-card expense">
+              <span>Saídas</span>
+              <strong id="total-expense">R$ 0,00</strong>
             </article>
+          </div>
 
-            <article class="cycle-card">
-              <div>
-                <span class="mini-label">Ciclo ativo</span>
-                <strong id="current-cycle-label">Ciclo atual</strong>
-                <p id="current-cycle-copy">Os lançamentos deste ciclo aparecem aqui.</p>
-              </div>
-              <button class="secondary-action compact" id="open-close-cycle" type="button">Fechar ciclo</button>
-            </article>
-
-            <div class="section-heading">
-              <h2>Recentes</h2>
-              <button class="text-button" data-open-tab="history" type="button">Ver tudo</button>
+          <article class="behavior-card">
+            <div>
+              <span class="mini-label">Comportamento</span>
+              <strong id="behavior-title">Estável</strong>
+              <p id="behavior-copy">Seu ciclo ainda está tomando forma.</p>
             </div>
-            <div class="movement-list compact" id="recent-list"></div>
+            <div class="behavior-ring" id="behavior-ring"><span id="behavior-percent">0%</span></div>
+          </article>
 
-            <div class="section-heading">
-              <h2>Leituras rápidas</h2>
+          <article class="cycle-card">
+            <div>
+              <span class="mini-label">Ciclo ativo</span>
+              <strong id="current-cycle-label">Ciclo atual</strong>
+              <p id="current-cycle-copy">Os lançamentos deste ciclo aparecem aqui.</p>
             </div>
-            <div class="insight-stack" id="quick-insights"></div>
-          </section>
+            <button class="secondary-action compact" id="open-close-cycle" type="button">Fechar ciclo</button>
+          </article>
 
-          <section class="tab-panel" id="tab-history" data-title="Histórico claro, sem esforço.">
-            <div class="filter-row" role="tablist" aria-label="Filtros do histórico">
-              <button class="filter-pill active" type="button" data-filter="all">Todos</button>
-              <button class="filter-pill" type="button" data-filter="income">Entradas</button>
-              <button class="filter-pill" type="button" data-filter="expense">Saídas</button>
-            </div>
-            <div class="movement-list" id="history-list"></div>
-          </section>
+          <div class="section-heading">
+            <h2>Recentes</h2>
+            <button class="text-button" data-open-tab="history" type="button">Ver tudo</button>
+          </div>
+          <div class="movement-list compact" id="recent-list"></div>
 
-          <section class="tab-panel" id="tab-analysis" data-title="A forma dos seus gastos.">
-            <div class="analysis-toggle" role="group" aria-label="Tipo de análise">
-              <button class="analysis-type active" type="button" data-analysis-type="expense">Gastos</button>
-              <button class="analysis-type" type="button" data-analysis-type="income">Receitas</button>
-            </div>
-            <article class="analysis-hero">
-              <div class="analysis-copy">
-                <span class="mini-label" id="analysis-period">Análise do ciclo</span>
-                <strong id="top-category">Sem dados</strong>
-                <p id="top-category-copy">Adicione saídas para revelar padrões.</p>
-                <div class="analysis-stats">
-                  <span id="analysis-total">R$ 0,00 em saídas</span>
-                  <span id="analysis-count">0 movimentos</span>
-                </div>
-              </div>
-              <div class="donut-wrap">
-                <div class="donut" id="category-donut" aria-label="Gráfico por categoria"></div>
-                <span id="donut-center">0%</span>
-              </div>
-            </article>
-            <div class="section-heading">
-              <h2>Por categoria</h2>
-            </div>
-            <div class="category-bars" id="category-bars"></div>
-          </section>
-
-          <section class="tab-panel" id="tab-insights" data-title="Pequenos sinais, boas decisões.">
-            <article class="insight-lead">
-              <span class="mini-label">Pulso do ciclo</span>
-              <strong id="insight-headline">Seu padrão aparece aqui.</strong>
-              <p id="insight-subtitle">As frases mudam automaticamente com suas movimentações.</p>
-            </article>
-            <div class="insight-stack large" id="insights-list"></div>
-          </section>
-
-          <section class="tab-panel" id="tab-cycles" data-title="Ciclos fechados, sem ruído.">
-            <article class="cycle-hero">
-              <div>
-                <span class="mini-label">Ciclo ativo</span>
-                <strong id="cycles-current-label">Ciclo atual</strong>
-                <p id="cycles-current-copy">Feche o ciclo manualmente quando quiser virar o período.</p>
-              </div>
-              <button class="primary-action compact" id="open-close-cycle-cta" type="button">Fechar ciclo</button>
-            </article>
-
-            <div class="section-heading">
-              <h2>Ciclos fechados</h2>
-              <span class="section-subtitle" id="closed-cycles-count">0 ciclos</span>
-            </div>
-            <div class="cycle-list" id="cycle-list"></div>
-          </section>
+          <div class="section-heading">
+            <h2>Leituras rápidas</h2>
+          </div>
+          <div class="insight-stack" id="quick-insights"></div>
         </section>
 
-        <button class="fab" id="open-form" type="button" aria-label="Adicionar movimentação">
+        <section class="tab-panel" id="tab-history" data-title="Histórico claro, sem esforço.">
+          <div class="filter-row" role="tablist" aria-label="Filtros do histórico">
+            <button class="filter-pill active" type="button" data-filter="all">Todos</button>
+            <button class="filter-pill" type="button" data-filter="income">Entradas</button>
+            <button class="filter-pill" type="button" data-filter="expense">Saídas</button>
+          </div>
+          <div class="movement-list" id="history-list"></div>
+        </section>
+
+        <section class="tab-panel" id="tab-analysis" data-title="A forma dos seus gastos.">
+          <div class="analysis-toggle" role="group" aria-label="Tipo de análise">
+            <button class="analysis-type active" type="button" data-analysis-type="expense">Gastos</button>
+            <button class="analysis-type" type="button" data-analysis-type="income">Receitas</button>
+          </div>
+          <article class="analysis-hero">
+            <div class="analysis-copy">
+              <span class="mini-label" id="analysis-period">Análise do ciclo</span>
+              <strong id="top-category">Sem dados</strong>
+              <p id="top-category-copy">Adicione saídas para revelar padrões.</p>
+              <div class="analysis-stats">
+                <span id="analysis-total">R$ 0,00 em saídas</span>
+                <span id="analysis-count">0 movimentos</span>
+              </div>
+            </div>
+            <div class="donut-wrap">
+              <div class="donut" id="category-donut" aria-label="Gráfico por categoria"></div>
+              <span id="donut-center">0%</span>
+            </div>
+          </article>
+          <div class="section-heading">
+            <h2>Por categoria</h2>
+          </div>
+          <div class="category-bars" id="category-bars"></div>
+        </section>
+
+        <section class="tab-panel" id="tab-insights" data-title="Pequenos sinais, boas decisões.">
+          <article class="insight-lead">
+            <span class="mini-label">Pulso do ciclo</span>
+            <strong id="insight-headline">Seu padrão aparece aqui.</strong>
+            <p id="insight-subtitle">As frases mudam automaticamente com suas movimentações.</p>
+          </article>
+          <div class="insight-stack large" id="insights-list"></div>
+        </section>
+
+        <section class="tab-panel" id="tab-cycles" data-title="Ciclos fechados, sem ruído.">
+          <article class="cycle-hero">
+            <div>
+              <span class="mini-label">Ciclo ativo</span>
+              <strong id="cycles-current-label">Ciclo atual</strong>
+              <p id="cycles-current-copy">Feche o ciclo manualmente quando quiser virar o período.</p>
+            </div>
+            <button class="primary-action compact" id="open-close-cycle-cta" type="button">Fechar ciclo</button>
+          </article>
+
+          <div class="section-heading">
+            <h2>Ciclos fechados</h2>
+            <span class="section-subtitle" id="closed-cycles-count">0 ciclos</span>
+          </div>
+          <div class="cycle-list" id="cycle-list"></div>
+        </section>
+      </section>
+
+      <button class="fab" id="open-form" type="button" aria-label="Adicionar movimentação">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14" />
+          <path d="M5 12h14" />
+        </svg>
+      </button>
+      <div class="save-toast" id="save-toast" role="status" aria-live="polite">Movimentação salva</div>
+
+
+
+    </section>
+  </main>
+
+  <section class="sheet" id="movement-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-sheet></div>
+    <form class="movement-form" id="movement-form">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Movimentação</p>
+          <h2 id="form-title">Adicionar rápido</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-sheet aria-label="Fechar">
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 5v14" />
-            <path d="M5 12h14" />
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
           </svg>
         </button>
-        <div class="save-toast" id="save-toast" role="status" aria-live="polite">Movimentação salva</div>
+      </div>
 
+      <input type="hidden" id="movement-id" />
+      <div class="type-toggle" role="group" aria-label="Tipo de movimentação">
+        <button class="toggle-option active" type="button" data-type="expense">Saída</button>
+        <button class="toggle-option" type="button" data-type="income">Entrada</button>
+      </div>
 
+      <label class="field value-field">
+        <span>Valor</span>
+        <input id="amount" type="text" inputmode="decimal" placeholder="0,00" required />
+      </label>
 
-      </section>
-    </main>
+      <div class="field category-field">
+        <span>Categoria <small id="category-context">para saída</small></span>
+        <input id="category" type="hidden" required />
+        <button class="category-select" id="category-select" type="button" aria-haspopup="dialog">
+          <span id="category-select-label">Escolher categoria</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+      </div>
 
-    <section class="sheet" id="movement-sheet" aria-hidden="true">
-      <div class="sheet-backdrop" data-close-sheet></div>
-      <form class="movement-form" id="movement-form">
-        <div class="grabber" aria-hidden="true"></div>
-        <div class="sheet-header">
-          <div>
-            <p class="eyebrow">Movimentação</p>
-            <h2 id="form-title">Adicionar rápido</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-sheet aria-label="Fechar">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-          </button>
+      <label class="field">
+        <span>Descrição curta</span>
+        <input id="description" type="text" maxlength="42" placeholder="Café, mercado, freela..." required />
+      </label>
+
+      <label class="field">
+        <span>Data</span>
+        <input id="date" type="date" required />
+      </label>
+
+      <button class="primary-action" type="submit">Salvar movimentação</button>
+    </form>
+  </section>
+
+  <section class="sheet category-sheet" id="category-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-category-sheet></div>
+    <div class="movement-form category-form" role="dialog" aria-modal="true" aria-labelledby="category-sheet-title">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow" id="category-sheet-context">Categorias</p>
+          <h2 id="category-sheet-title">Escolher categoria</h2>
         </div>
+        <button class="icon-button" type="button" data-close-category-sheet aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
 
-        <input type="hidden" id="movement-id" />
-        <div class="type-toggle" role="group" aria-label="Tipo de movimentação">
-          <button class="toggle-option active" type="button" data-type="expense">Saída</button>
-          <button class="toggle-option" type="button" data-type="income">Entrada</button>
-        </div>
+      <div class="category-list" id="category-list" role="listbox" aria-label="Categorias disponíveis"></div>
+      <p class="form-note category-feedback" id="category-feedback" role="alert"></p>
 
-        <label class="field value-field">
-          <span>Valor</span>
-          <input id="amount" type="text" inputmode="decimal" placeholder="0,00" required />
-        </label>
-
-        <div class="field category-field">
-          <span>Categoria <small id="category-context">para saída</small></span>
-          <input id="category" type="hidden" required />
-          <button class="category-select" id="category-select" type="button" aria-haspopup="dialog">
-            <span id="category-select-label">Escolher categoria</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-          </button>
-        </div>
-
+      <div class="new-category-panel" id="new-category-panel" hidden>
         <label class="field">
-          <span>Descrição curta</span>
-          <input id="description" type="text" maxlength="42" placeholder="Café, mercado, freela..." required />
+          <span id="category-editor-title">Nova categoria</span>
+          <input id="new-category-name" type="text" maxlength="28" placeholder="Nome da categoria" />
         </label>
-
-        <label class="field">
-          <span>Data</span>
-          <input id="date" type="date" required />
-        </label>
-
-        <button class="primary-action" type="submit">Salvar movimentação</button>
-      </form>
-    </section>
-
-    <section class="sheet category-sheet" id="category-sheet" aria-hidden="true">
-      <div class="sheet-backdrop" data-close-category-sheet></div>
-      <div class="movement-form category-form" role="dialog" aria-modal="true" aria-labelledby="category-sheet-title">
-        <div class="grabber" aria-hidden="true"></div>
-        <div class="sheet-header">
-          <div>
-            <p class="eyebrow" id="category-sheet-context">Categorias</p>
-            <h2 id="category-sheet-title">Escolher categoria</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-category-sheet aria-label="Fechar">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-          </button>
-        </div>
-
-        <div class="category-list" id="category-list" role="listbox" aria-label="Categorias disponíveis"></div>
-        <p class="form-note category-feedback" id="category-feedback" role="alert"></p>
-
-        <div class="new-category-panel" id="new-category-panel" hidden>
-          <label class="field">
-            <span id="category-editor-title">Nova categoria</span>
-            <input id="new-category-name" type="text" maxlength="28" placeholder="Nome da categoria" />
-          </label>
-          <button class="primary-action compact" id="save-category" type="button">Salvar categoria</button>
-          <p class="form-note" id="category-error" role="alert"></p>
-        </div>
+        <button class="primary-action compact" id="save-category" type="button">Salvar categoria</button>
+        <p class="form-note" id="category-error" role="alert"></p>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="sheet migration-sheet" id="migration-sheet" aria-hidden="true">
-      <div class="sheet-backdrop" data-close-migration-sheet></div>
-      <div class="movement-form migration-form" role="dialog" aria-modal="true" aria-labelledby="migration-title">
-        <div class="grabber" aria-hidden="true"></div>
-        <div class="sheet-header">
-          <div>
-            <p class="eyebrow">Migração local</p>
-            <h2 id="migration-title">Importar dados deste aparelho?</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-migration-sheet aria-label="Fechar">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-          </button>
+  <section class="sheet migration-sheet" id="migration-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-migration-sheet></div>
+    <div class="movement-form migration-form" role="dialog" aria-modal="true" aria-labelledby="migration-title">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Migração local</p>
+          <h2 id="migration-title">Importar dados deste aparelho?</h2>
         </div>
-        <p class="migration-copy" id="migration-copy">
-          Encontramos dados salvos neste aparelho. Deseja importar para sua conta?
-        </p>
-        <p class="form-note migration-note" id="migration-note">
-          Isso não apaga os dados do banco. Apenas leva o histórico local para sua conta.
-        </p>
-        <button class="primary-action" id="import-local-data" type="button">Importar agora</button>
-        <button class="secondary-action" id="skip-local-data" type="button">Agora não</button>
+        <button class="icon-button" type="button" data-close-migration-sheet aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
       </div>
-    </section>
+      <p class="migration-copy" id="migration-copy">
+        Encontramos dados salvos neste aparelho. Deseja importar para sua conta?
+      </p>
+      <p class="form-note migration-note" id="migration-note">
+        Isso não apaga os dados do banco. Apenas leva o histórico local para sua conta.
+      </p>
+      <button class="primary-action" id="import-local-data" type="button">Importar agora</button>
+      <button class="secondary-action" id="skip-local-data" type="button">Agora não</button>
+    </div>
+  </section>
 
-    <section class="sheet" id="cycle-close-sheet" aria-hidden="true">
-      <div class="sheet-backdrop" data-close-cycle-sheet></div>
-      <div class="movement-form cycle-form" role="dialog" aria-modal="true" aria-labelledby="cycle-close-title">
-        <div class="grabber" aria-hidden="true"></div>
-        <div class="sheet-header">
-          <div>
-            <p class="eyebrow">Fechar ciclo</p>
-            <h2 id="cycle-close-title">Encerrar este período?</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-cycle-sheet aria-label="Fechar">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-          </button>
+  <section class="sheet" id="cycle-close-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-cycle-sheet></div>
+    <div class="movement-form cycle-form" role="dialog" aria-modal="true" aria-labelledby="cycle-close-title">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Fechar ciclo</p>
+          <h2 id="cycle-close-title">Encerrar este período?</h2>
         </div>
-        <p class="migration-copy" id="cycle-close-copy">O ciclo atual vai para o histórico e um novo ciclo vazio será aberto na sequência.</p>
-        <p class="form-note" id="cycle-close-note">Nenhum lançamento é apagado. Tudo continua salvo no histórico do usuário.</p>
-        <button class="primary-action" id="confirm-close-cycle" type="button">Fechar agora</button>
-        <button class="secondary-action" data-close-cycle-sheet type="button">Cancelar</button>
+        <button class="icon-button" type="button" data-close-cycle-sheet aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
       </div>
-    </section>
+      <p class="migration-copy" id="cycle-close-copy">O ciclo atual vai para o histórico e um novo ciclo vazio será
+        aberto na sequência.</p>
+      <p class="form-note" id="cycle-close-note">Nenhum lançamento é apagado. Tudo continua salvo no histórico do
+        usuário.</p>
+      <button class="primary-action" id="confirm-close-cycle" type="button">Fechar agora</button>
+      <button class="secondary-action" data-close-cycle-sheet type="button">Cancelar</button>
+    </div>
+  </section>
 
-    <section class="sheet" id="cycle-detail-sheet" aria-hidden="true">
-      <div class="sheet-backdrop" data-close-cycle-detail></div>
-      <div class="movement-form cycle-detail-form" role="dialog" aria-modal="true" aria-labelledby="cycle-detail-title">
-        <div class="grabber" aria-hidden="true"></div>
-        <div class="sheet-header">
-          <div>
-            <p class="eyebrow">Ciclo fechado</p>
-            <h2 id="cycle-detail-title">Detalhe do ciclo</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-cycle-detail aria-label="Fechar">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-          </button>
+  <section class="sheet" id="cycle-detail-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-cycle-detail></div>
+    <div class="movement-form cycle-detail-form" role="dialog" aria-modal="true" aria-labelledby="cycle-detail-title">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Ciclo fechado</p>
+          <h2 id="cycle-detail-title">Detalhe do ciclo</h2>
         </div>
-        <article class="cycle-detail-summary">
-          <div>
-            <span class="mini-label">Período</span>
-            <strong id="cycle-detail-period">-</strong>
-          </div>
-          <div>
-            <span class="mini-label">Saldo</span>
-            <strong id="cycle-detail-balance">R$ 0,00</strong>
-          </div>
-          <div>
-            <span class="mini-label">Movimentos</span>
-            <strong id="cycle-detail-count">0</strong>
-          </div>
-          <div>
-            <span class="mini-label">Entradas</span>
-            <strong id="cycle-detail-income">R$ 0,00</strong>
-          </div>
-          <div>
-            <span class="mini-label">Saídas</span>
-            <strong id="cycle-detail-expense">R$ 0,00</strong>
-          </div>
-        </article>
-        <div class="movement-list cycle-detail-list" id="cycle-detail-list"></div>
+        <button class="icon-button" type="button" data-close-cycle-detail aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
       </div>
-    </section>
+      <article class="cycle-detail-summary">
+        <div>
+          <span class="mini-label">Período</span>
+          <strong id="cycle-detail-period">-</strong>
+        </div>
+        <div>
+          <span class="mini-label">Saldo</span>
+          <strong id="cycle-detail-balance">R$ 0,00</strong>
+        </div>
+        <div>
+          <span class="mini-label">Movimentos</span>
+          <strong id="cycle-detail-count">0</strong>
+        </div>
+        <div>
+          <span class="mini-label">Entradas</span>
+          <strong id="cycle-detail-income">R$ 0,00</strong>
+        </div>
+        <div>
+          <span class="mini-label">Saídas</span>
+          <strong id="cycle-detail-expense">R$ 0,00</strong>
+        </div>
+      </article>
+      <div class="movement-list cycle-detail-list" id="cycle-detail-list"></div>
+    </div>
+  </section>
 
-    <script src="./app.js"></script>
-  </body>
+  <script src="./app.js"></script>
+</body>
+
 </html>
-

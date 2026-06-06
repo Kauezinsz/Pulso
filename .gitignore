@@ -32,7 +32,3 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
-
-# Local database and debug profiles
-.edge-debug-profile/
-data/
