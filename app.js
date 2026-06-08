@@ -46,6 +46,13 @@ const state = {
   activeFilter: "all",
   formType: "expense",
   selectedCategory: "",
+  receiptDraft: {
+    file: null,
+    previewUrl: "",
+    mode: "",
+    existing: null,
+    removeExisting: false,
+  },
   categories: cloneDefaultCategories(),
   categoryRecords: {
     income: [],
@@ -126,6 +133,17 @@ const elements = {
   categoryContext: $("#category-context"),
   categorySelect: $("#category-select"),
   categorySelectLabel: $("#category-select-label"),
+  receiptPanel: $("#receipt-panel"),
+  receiptStatus: $("#receipt-status"),
+  receiptPreview: $("#receipt-preview"),
+  receiptHint: $("#receipt-hint"),
+  receiptOpen: $("#receipt-open"),
+  receiptReplace: $("#receipt-replace"),
+  receiptRemove: $("#receipt-remove"),
+  receiptInput: $("#receipt-input"),
+  receiptCamera: $("#receipt-camera"),
+  receiptGallery: $("#receipt-gallery"),
+  receiptPdf: $("#receipt-pdf"),
   categorySheet: $("#category-sheet"),
   categorySheetContext: $("#category-sheet-context"),
   categoryList: $("#category-list"),
@@ -383,6 +401,13 @@ function authErrorMessage(error) {
   if (error.code === "goal_insufficient_saved") return "Não há valor suficiente guardado nessa meta.";
   if (error.code === "invalid_goal_amount") return "Informe um valor válido.";
   if (error.code === "goal_not_found") return "Não encontramos essa meta.";
+  if (error.code === "invalid_receipt_type") return "Use uma imagem JPG, JPEG, PNG, WEBP ou PDF.";
+  if (error.code === "receipt_too_large") return "O arquivo excede o tamanho permitido.";
+  if (error.code === "invalid_receipt") return "Selecione um comprovante v�lido.";
+  if (error.code === "receipt_not_allowed") return "Comprovante s� pode ser anexado em sa�das.";
+  if (error.code === "receipt_not_found") return "N�o encontramos esse comprovante.";
+  if (error.code === "invalid_content_type") return "Tente anexar o comprovante novamente.";
+  if (error.code === "missing_file") return "Escolha um arquivo para anexar.";
   return error.message || "Nao foi possivel continuar.";
 }
 
@@ -393,14 +418,19 @@ function handleUnauthorizedError(error) {
 }
 
 async function apiRequest(url, options = {}) {
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(resolveAppUrl(url), {
     method: options.method || "GET",
     credentials: "include",
     headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.body && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: options.body
+      ? isFormData
+        ? options.body
+        : JSON.stringify(options.body)
+      : undefined,
   });
 
   const contentType = response.headers.get("content-type") || "";
@@ -933,6 +963,17 @@ function normalizeMovementsPayload(items) {
         category: normalizeCategoryName(item.categoryName || ""),
         description: item.description,
         date: item.date,
+        receipt: item.receipt
+          ? {
+              storedName: item.receipt.storedName,
+              originalName: item.receipt.originalName,
+              mimeType: item.receipt.mimeType,
+              size: Number(item.receipt.size || 0),
+              uploadedAt: item.receipt.uploadedAt,
+              url: item.receipt.url,
+              kind: item.receipt.kind,
+            }
+          : null,
       }))
     : [];
 }
@@ -1001,6 +1042,16 @@ function bindEvents() {
 
   $("#open-form").addEventListener("click", () => openSheet());
   elements.categorySelect.addEventListener("click", openCategorySheet);
+  elements.receiptCamera.addEventListener("click", () => openReceiptPicker("camera"));
+  elements.receiptGallery.addEventListener("click", () => openReceiptPicker("image"));
+  elements.receiptPdf.addEventListener("click", () => openReceiptPicker("pdf"));
+  elements.receiptReplace.addEventListener("click", () => openReceiptPicker(state.receiptDraft.existing?.kind || state.receiptDraft.mode || "image"));
+  elements.receiptOpen.addEventListener("click", () => openCurrentReceipt());
+  elements.receiptRemove.addEventListener("click", () => removeReceiptSelection());
+  elements.receiptInput.addEventListener("change", () => {
+    const file = elements.receiptInput.files?.[0];
+    if (file) applyReceiptSelection(file);
+  });
   elements.openCloseCycle.addEventListener("click", openCloseCycleSheet);
   elements.openCloseCycleCta.addEventListener("click", openCloseCycleSheet);
   elements.confirmCloseCycle.addEventListener("click", () => {
@@ -1137,6 +1188,7 @@ function openSheet(movement = null) {
   elements.date.value = new Date().toISOString().slice(0, 10);
   elements.movementId.value = "";
   elements.formTitle.textContent = "Adicionar rápido";
+  resetReceiptDraft();
   setFormType("expense", { preserveCategory: false });
 
   if (movement) {
@@ -1147,16 +1199,19 @@ function openSheet(movement = null) {
     elements.date.value = movement.date;
     setFormType(movement.type, { preserveCategory: true });
     selectCategory(movement.category);
+    setReceiptDraftFromMovement(movement);
   }
 
   elements.sheet.classList.add("open");
   elements.sheet.setAttribute("aria-hidden", "false");
+  syncReceiptPanel();
   setTimeout(() => elements.amount.focus(), 120);
 }
 
 function closeSheet() {
   elements.sheet.classList.remove("open");
   elements.sheet.setAttribute("aria-hidden", "true");
+  resetReceiptDraft();
 }
 
 function setFormType(type, options = {}) {
@@ -1166,13 +1221,226 @@ function setFormType(type, options = {}) {
   if (!options.preserveCategory || !currentIsValid) {
     state.selectedCategory = "";
   }
+  if (type === "income" && state.receiptDraft.file) {
+    clearPendingReceiptFile();
+  }
   updateCategoryField();
+  syncReceiptPanel();
 }
 
 function selectCategory(category) {
   state.selectedCategory = category;
   updateCategoryField();
   renderCategoryList();
+}
+
+function resetReceiptDraft() {
+  if (state.receiptDraft.previewUrl) {
+    URL.revokeObjectURL(state.receiptDraft.previewUrl);
+  }
+  state.receiptDraft = {
+    file: null,
+    previewUrl: "",
+    mode: "",
+    existing: null,
+    removeExisting: false,
+  };
+  if (elements.receiptInput) {
+    elements.receiptInput.value = "";
+    elements.receiptInput.accept = "image/*,application/pdf";
+    elements.receiptInput.removeAttribute("capture");
+  }
+  syncReceiptPanel(true);
+}
+
+function setReceiptDraftFromMovement(movement) {
+  if (!movement) return;
+  state.receiptDraft.existing = movement.receipt || null;
+  state.receiptDraft.removeExisting = false;
+  syncReceiptPanel(true);
+}
+
+function clearPendingReceiptFile() {
+  if (state.receiptDraft.previewUrl) {
+    URL.revokeObjectURL(state.receiptDraft.previewUrl);
+  }
+  state.receiptDraft.file = null;
+  state.receiptDraft.previewUrl = "";
+  state.receiptDraft.mode = "";
+  if (elements.receiptInput) {
+    elements.receiptInput.value = "";
+    elements.receiptInput.accept = "image/*,application/pdf";
+    elements.receiptInput.removeAttribute("capture");
+  }
+}
+
+function syncReceiptPanel(force = false) {
+  if (!elements.receiptPanel) return;
+  const visible = state.formType === "expense";
+  elements.receiptPanel.hidden = !visible;
+  if (!visible) {
+    elements.receiptStatus.textContent = "";
+    elements.receiptHint.textContent = "Comprovante disponível apenas para saídas.";
+    return;
+  }
+
+  const current = state.receiptDraft.file
+    ? {
+        file: state.receiptDraft.file,
+        previewUrl: state.receiptDraft.previewUrl,
+        originalName: state.receiptDraft.file.name,
+        mimeType: state.receiptDraft.file.type,
+        kind: state.receiptDraft.mode === "pdf" ? "pdf" : "image",
+        pending: true,
+      }
+    : state.receiptDraft.removeExisting
+      ? null
+      : state.receiptDraft.existing;
+
+  elements.receiptStatus.textContent = current
+    ? state.receiptDraft.file
+      ? `Novo arquivo selecionado: ${state.receiptDraft.file.name}`
+      : `Comprovante salvo: ${state.receiptDraft.existing?.originalName || "arquivo"}`
+    : "Adicione uma imagem ou PDF ao lançamento.";
+
+  elements.receiptHint.textContent = current
+    ? "Você pode abrir, remover ou substituir este comprovante."
+    : "Imagem até 5 MB, PDF até 10 MB.";
+
+  elements.receiptPreview.innerHTML = renderReceiptPreview(current);
+  elements.receiptOpen.hidden = !current;
+  elements.receiptRemove.hidden = !current;
+  if (elements.receiptReplace) {
+    elements.receiptReplace.hidden = !current;
+  }
+}
+
+function renderReceiptPreview(receipt) {
+  if (!receipt) {
+    return `<div class="receipt-empty">
+      <strong>Sem comprovante</strong>
+      <span>Tire uma foto, escolha uma imagem ou anexe um PDF.</span>
+    </div>`;
+  }
+
+  const isPdf = receipt.kind === "pdf" || receipt.mimeType === "application/pdf";
+  const label = escapeHtml(receipt.originalName || receipt.file?.name || "Comprovante");
+  const size = receipt.file ? receipt.file.size : Number(receipt.size || 0);
+  const sizeLabel = size ? formatFileSize(size) : "";
+  const url = receipt.previewUrl || receipt.url || "";
+
+  return `
+    <div class="receipt-preview ${isPdf ? "pdf" : "image"}">
+      <div class="receipt-preview-media">
+        ${
+          isPdf
+            ? `<div class="receipt-pdf-mark" aria-hidden="true">PDF</div>`
+            : `<img src="${escapeHtml(url)}" alt="${label}" />`
+        }
+      </div>
+      <div class="receipt-preview-copy">
+        <strong>${label}</strong>
+        <span>${isPdf ? "Documento PDF" : "Imagem"}${sizeLabel ? ` · ${sizeLabel}` : ""}</span>
+      </div>
+    </div>`;
+}
+
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  return `${Math.max(Math.round(bytes / 1024), 1)} KB`;
+}
+
+function openReceiptPicker(mode) {
+  if (!elements.receiptInput || state.formType !== "expense") return;
+  elements.receiptInput.value = "";
+  elements.receiptInput.removeAttribute("capture");
+
+  if (mode === "pdf") {
+    elements.receiptInput.accept = "application/pdf,.pdf";
+  } else {
+    elements.receiptInput.accept = "image/*";
+    if (mode === "camera") {
+      elements.receiptInput.setAttribute("capture", "environment");
+    }
+  }
+
+  state.receiptDraft.mode = mode === "pdf" ? "pdf" : "image";
+  elements.receiptInput.click();
+}
+
+function validateReceiptFile(file) {
+  if (!file) return "Selecione um arquivo válido.";
+  const mimeType = isReceiptMimeAllowed(file);
+  if (!mimeType) return "Use uma imagem JPG, JPEG, PNG, WEBP ou um PDF.";
+
+  const limit = mimeType === "application/pdf" ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (file.size > limit) {
+    return mimeType === "application/pdf"
+      ? "O PDF deve ter até 10 MB."
+      : "A imagem deve ter até 5 MB.";
+  }
+  return "";
+}
+
+function isReceiptMimeAllowed(file) {
+  const mime = String(file?.type || "").toLowerCase();
+  if (["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(mime)) return mime;
+  const name = String(file?.name || "").toLowerCase();
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".pdf")) return "application/pdf";
+  return "";
+}
+
+function applyReceiptSelection(file) {
+  const validation = validateReceiptFile(file);
+  if (validation) {
+    showToast(validation, "neutral");
+    if (elements.receiptStatus) elements.receiptStatus.textContent = validation;
+    return false;
+  }
+
+  if (state.receiptDraft.previewUrl) {
+    URL.revokeObjectURL(state.receiptDraft.previewUrl);
+  }
+
+  state.receiptDraft.file = file;
+  state.receiptDraft.previewUrl = URL.createObjectURL(file);
+  state.receiptDraft.removeExisting = false;
+  state.receiptDraft.mode = isReceiptMimeAllowed(file) === "application/pdf" ? "pdf" : "image";
+  syncReceiptPanel(true);
+  return true;
+}
+
+function removeReceiptSelection() {
+  if (state.receiptDraft.previewUrl) {
+    URL.revokeObjectURL(state.receiptDraft.previewUrl);
+  }
+
+  state.receiptDraft.file = null;
+  state.receiptDraft.previewUrl = "";
+
+  if (state.receiptDraft.existing) {
+    state.receiptDraft.removeExisting = true;
+  }
+
+  if (elements.receiptInput) {
+    elements.receiptInput.value = "";
+  }
+
+  syncReceiptPanel(true);
+}
+
+function openCurrentReceipt() {
+  const receipt = state.receiptDraft.file
+    ? {
+        url: state.receiptDraft.previewUrl,
+      }
+    : state.receiptDraft.existing;
+  if (!receipt?.url) return;
+  window.open(receipt.url, "_blank", "noopener,noreferrer");
 }
 
 function openCategorySheet() {
@@ -1392,6 +1660,7 @@ async function saveMovement(event) {
   const isEditing = Boolean(elements.movementId.value);
   const categoryName = elements.category.value || state.selectedCategory;
   const categoryId = getCategoryIdByName(state.formType, categoryName);
+  const currentMovement = isEditing ? state.movements.find((item) => item.id === elements.movementId.value) : null;
 
   const movement = {
     id: elements.movementId.value || crypto.randomUUID(),
@@ -1426,9 +1695,43 @@ async function saveMovement(event) {
       });
     }
 
+    let receiptError = null;
+    const receiptFile = state.formType === "expense" ? state.receiptDraft.file : null;
+    const shouldClearReceipt = Boolean(
+      currentMovement?.receipt && (movement.type === "income" || (state.receiptDraft.removeExisting && !receiptFile)),
+    );
+
+    if (receiptFile) {
+      try {
+        const formData = new FormData();
+        formData.append("file", receiptFile);
+        await apiRequest(`/api/movements/${encodeURIComponent(movement.id)}/receipt`, {
+          method: "POST",
+          body: formData,
+        });
+      } catch (error) {
+        receiptError = error;
+      }
+    } else if (shouldClearReceipt) {
+      try {
+        await apiRequest(`/api/movements/${encodeURIComponent(movement.id)}/receipt`, {
+          method: "DELETE",
+        });
+      } catch (error) {
+        receiptError = error;
+      }
+    }
+
     await loadUserData();
-    closeSheet();
     render({ pulse: true });
+    if (receiptError) {
+      elements.receiptStatus.textContent = authErrorMessage(receiptError);
+      showToast(authErrorMessage(receiptError), "neutral");
+      return;
+    }
+
+    closeSheet();
+    resetReceiptDraft();
     showToast(isEditing ? "Movimentação atualizada" : movement.type === "income" ? "Entrada salva" : "Saída salva", "success");
   } catch (error) {
     if (handleUnauthorizedError(error)) return;
@@ -1543,6 +1846,13 @@ function renderHistory() {
   elements.historyList.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", () => deleteMovement(button.dataset.delete, button.closest(".movement-item")));
   });
+
+  elements.historyList.querySelectorAll(".row-actions").forEach((details) => {
+    const item = details.closest(".movement-item");
+    const syncState = () => item?.classList.toggle("has-actions-open", details.open);
+    syncState();
+    details.addEventListener("toggle", syncState);
+  });
 }
 
 function renderAnalysis(totals) {
@@ -1594,6 +1904,9 @@ function renderMovementList(movements, options = {}) {
       const signal = movement.type === "income" ? "+" : "-";
       const categoryName = movement.category || getCategoryNameById(movement.categoryId);
       const meta = getCategoryMeta(categoryName);
+      const receiptAction = movement.receipt
+        ? `<a class="receipt-chip" href="${escapeHtml(movement.receipt.url)}" target="_blank" rel="noopener noreferrer">${movement.receipt.kind === "pdf" ? "PDF" : "Comprovante"}</a>`
+        : "";
       const actions = options.withActions
         ? `<details class="row-actions">
             <summary aria-label="Ações de ${escapeHtml(movement.description)}">
@@ -1614,6 +1927,7 @@ function renderMovementList(movements, options = {}) {
         </div>
         <div class="movement-side">
           <span class="movement-value">${signal}${currency.format(movement.amount)}</span>
+          ${receiptAction ? `<div class="movement-receipt">${receiptAction}</div>` : ""}
           ${actions}
         </div>
       </article>`;
@@ -1718,7 +2032,7 @@ function buildInsights(totals) {
       badge: "Maior impacto",
       tone: "impact",
       title: `${capitalize(top.category)} está puxando o ciclo`,
-      copy: `${currency.format(top.total)} foram para ${top.category}. É o melhor ponto para olhar primeiro.`,
+      copy: `${currency.format(top.total)} foram para ${top.category}. �? o melhor ponto para olhar primeiro.`,
     });
   }
 
@@ -1749,14 +2063,14 @@ function buildInsights(totals) {
 
   if (last7 > previous7 && previous7 > 0) {
     insights.push({
-      badge: "Últimos 7 dias",
+      badge: "�sltimos 7 dias",
       tone: "alert",
       title: "A semana acelerou",
       copy: `${currency.format(last7 - previous7)} a mais em gastos que a semana anterior.`,
     });
   } else if (last7 > 0) {
     insights.push({
-      badge: "Últimos 7 dias",
+      badge: "�sltimos 7 dias",
       tone: "soft",
       title: "Ritmo recente mapeado",
       copy: `Suas saídas recentes somaram ${currency.format(last7)}.`,
@@ -1991,7 +2305,7 @@ function periodLabel(tab) {
 
 function formatDate(date) {
   const parsed = new Date(`${date}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return "—";
+    if (Number.isNaN(parsed.getTime())) return "—";
   return dateFormatter.format(parsed).replace(".", "");
 }
 
@@ -2005,10 +2319,10 @@ function formatCyclePeriod(cycle) {
   const started = formatDate(cycle.startedAt);
   if (cycle.status === "closed" && cycle.closedAt) {
     const ended = formatDate(cycle.closedAt);
-    if (started === "—" || ended === "—") return "Ciclo fechado";
+        if (started === "—" || ended === "—") return "Ciclo fechado";
     return `${started} - ${ended}`;
   }
-  if (started === "—") return "Ciclo atual";
+    if (started === "—") return "Ciclo atual";
   return `Aberto em ${formatDate(cycle.startedAt)}`;
 }
 
@@ -2041,3 +2355,5 @@ function escapeHtml(value) {
     }[char];
   });
 }
+
+

@@ -9,6 +9,7 @@ const host = "127.0.0.1";
 const port = Number(process.env.PORT || process.env.PULSO_PORT || 4173);
 const appBasePath = process.env.PULSO_BASE_PATH || "/pulso";
 const dataDir = path.join(root, "data");
+const uploadsDir = path.join(dataDir, "uploads");
 const dbPath = process.env.PULSO_DB_PATH || path.join(dataDir, "pulso.sqlite");
 
 const mimeTypes = {
@@ -29,6 +30,7 @@ const defaultCategoriesByType = {
 };
 
 fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(uploadsDir, { recursive: true });
 
 const db = new DatabaseSync(dbPath);
 db.exec(`
@@ -75,6 +77,11 @@ db.exec(`
     description TEXT NOT NULL,
     movement_date TEXT NOT NULL,
     source_key TEXT NOT NULL,
+    receipt_stored_name TEXT,
+    receipt_original_name TEXT,
+    receipt_mime_type TEXT,
+    receipt_size INTEGER,
+    receipt_uploaded_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(user_id, source_key)
@@ -109,6 +116,7 @@ db.exec(`
 `);
 
 ensureMovementCycleColumn();
+ensureMovementReceiptColumns();
 
 const statements = {
   insertUser: db.prepare(`
@@ -322,6 +330,11 @@ const statements = {
       movements.category_id AS categoryId,
       movements.cycle_id AS cycleId,
       movements.source_key AS sourceKey,
+      movements.receipt_stored_name AS receiptStoredName,
+      movements.receipt_original_name AS receiptOriginalName,
+      movements.receipt_mime_type AS receiptMimeType,
+      movements.receipt_size AS receiptSize,
+      movements.receipt_uploaded_at AS receiptUploadedAt,
       movements.created_at AS createdAt,
       movements.updated_at AS updatedAt,
       categories.name AS categoryName,
@@ -341,6 +354,11 @@ const statements = {
       movements.category_id AS categoryId,
       movements.cycle_id AS cycleId,
       movements.source_key AS sourceKey,
+      movements.receipt_stored_name AS receiptStoredName,
+      movements.receipt_original_name AS receiptOriginalName,
+      movements.receipt_mime_type AS receiptMimeType,
+      movements.receipt_size AS receiptSize,
+      movements.receipt_uploaded_at AS receiptUploadedAt,
       movements.created_at AS createdAt,
       movements.updated_at AS updatedAt
     FROM movements
@@ -364,16 +382,28 @@ const statements = {
   insertMovement: db.prepare(`
     INSERT INTO movements (
       id, user_id, cycle_id, type, amount, category_id, description, movement_date,
-      source_key, created_at, updated_at
+      source_key, receipt_stored_name, receipt_original_name, receipt_mime_type,
+      receipt_size, receipt_uploaded_at, created_at, updated_at
     )
     VALUES (
       @id, @userId, @cycleId, @type, @amount, @categoryId, @description, @movementDate,
-      @sourceKey, @createdAt, @updatedAt
+      @sourceKey, @receiptStoredName, @receiptOriginalName, @receiptMimeType,
+      @receiptSize, @receiptUploadedAt, @createdAt, @updatedAt
     )
   `),
   updateMovement: db.prepare(`
     UPDATE movements
     SET type = ?, amount = ?, category_id = ?, description = ?, movement_date = ?, updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `),
+  updateMovementReceipt: db.prepare(`
+    UPDATE movements
+    SET receipt_stored_name = ?, receipt_original_name = ?, receipt_mime_type = ?, receipt_size = ?, receipt_uploaded_at = ?, updated_at = ?
+    WHERE id = ? AND user_id = ?
+  `),
+  clearMovementReceipt: db.prepare(`
+    UPDATE movements
+    SET receipt_stored_name = NULL, receipt_original_name = NULL, receipt_mime_type = NULL, receipt_size = NULL, receipt_uploaded_at = NULL, updated_at = ?
     WHERE id = ? AND user_id = ?
   `),
   deleteMovement: db.prepare(`DELETE FROM movements WHERE id = ? AND user_id = ?`),
@@ -385,6 +415,98 @@ function ensureMovementCycleColumn() {
     db.exec(`ALTER TABLE movements ADD COLUMN cycle_id TEXT REFERENCES cycles(id) ON DELETE RESTRICT`);
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_movements_cycle_lookup ON movements(user_id, cycle_id, movement_date DESC)`);
+}
+
+function ensureMovementReceiptColumns() {
+  const columns = db.prepare(`PRAGMA table_info(movements)`).all().map((column) => column.name);
+  const missing = [
+    ["receipt_stored_name", "TEXT"],
+    ["receipt_original_name", "TEXT"],
+    ["receipt_mime_type", "TEXT"],
+    ["receipt_size", "INTEGER"],
+    ["receipt_uploaded_at", "TEXT"],
+  ];
+
+  for (const [name, type] of missing) {
+    if (!columns.includes(name)) {
+      db.exec(`ALTER TABLE movements ADD COLUMN ${name} ${type}`);
+    }
+  }
+}
+
+const RECEIPT_LIMITS = {
+  image: 5 * 1024 * 1024,
+  pdf: 10 * 1024 * 1024,
+};
+
+const RECEIPT_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+
+function isReceiptSupported(mimeType, filename) {
+  const normalizedMime = String(mimeType || "").toLowerCase();
+  if (RECEIPT_MIME_TYPES.has(normalizedMime)) return normalizedMime;
+
+  const extension = path.extname(String(filename || "")).toLowerCase();
+  if ([".jpg", ".jpeg"].includes(extension)) return "image/jpeg";
+  if (extension === ".png") return "image/png";
+  if (extension === ".webp") return "image/webp";
+  if (extension === ".pdf") return "application/pdf";
+  return "";
+}
+
+function receiptKindForMime(mimeType) {
+  return mimeType === "application/pdf" ? "pdf" : "image";
+}
+
+function receiptExtensionForMime(mimeType) {
+  if (mimeType === "application/pdf") return ".pdf";
+  if (mimeType === "image/png") return ".png";
+  if (mimeType === "image/webp") return ".webp";
+  return ".jpg";
+}
+
+function sanitizeFileName(name) {
+  return String(name || "comprovante")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "comprovante";
+}
+
+function buildReceiptStoredName(movementId, mimeType) {
+  return `${movementId}-${crypto.randomUUID()}${receiptExtensionForMime(mimeType)}`;
+}
+
+function getReceiptFilePath(storedName) {
+  return path.join(uploadsDir, storedName);
+}
+
+function deleteFileIfExists(filePath) {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch {
+    // Arquivo órfão não impede o fluxo.
+  }
+}
+
+function streamFile(response, filePath, mimeType, fileName) {
+  const stream = fs.createReadStream(filePath);
+  const safeName = sanitizeFileName(fileName);
+  response.writeHead(200, {
+    "Content-Type": mimeType,
+    "Content-Disposition": `inline; filename="${safeName}"`,
+    "Cache-Control": "no-store",
+  });
+  stream.on("error", () => {
+    if (!response.headersSent) {
+      sendText(response, 404, "Not found");
+    } else {
+      response.destroy();
+    }
+  });
+  stream.pipe(response);
 }
 
 function migrateCyclesForExistingUsers() {
@@ -483,13 +605,13 @@ function sendText(response, statusCode, text, contentType = "text/plain; charset
   response.end(text);
 }
 
-function readJsonBody(request) {
+function readBufferBody(request, limitBytes = 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     request.on("data", (chunk) => {
       size += chunk.length;
-      if (size > 1024 * 1024) {
+      if (size > limitBytes) {
         reject(new Error("Payload too large"));
         request.destroy();
         return;
@@ -497,18 +619,86 @@ function readJsonBody(request) {
       chunks.push(chunk);
     });
     request.on("end", () => {
-      if (!chunks.length) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch {
-        reject(new Error("Invalid JSON"));
-      }
+      resolve(Buffer.concat(chunks));
     });
     request.on("error", reject);
   });
+}
+
+async function readJsonBody(request) {
+  const buffer = await readBufferBody(request);
+  if (!buffer.length) return {};
+  try {
+    return JSON.parse(buffer.toString("utf8"));
+  } catch {
+    throw new Error("Invalid JSON");
+  }
+}
+
+function parseMultipartFormData(buffer, contentType) {
+  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType || "");
+  if (!boundaryMatch) {
+    const error = new Error("invalid_multipart");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const boundary = boundaryMatch[1] || boundaryMatch[2];
+  const body = buffer.toString("binary");
+  const segments = body.split(`--${boundary}`);
+  const fields = {};
+  const files = [];
+
+  for (const segment of segments.slice(1, -1)) {
+    let part = segment;
+    if (part.startsWith("\r\n")) part = part.slice(2);
+    if (part.endsWith("\r\n")) part = part.slice(0, -2);
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd < 0) continue;
+
+    const headerText = part.slice(0, headerEnd);
+    let dataText = part.slice(headerEnd + 4);
+    if (dataText.endsWith("\r\n")) dataText = dataText.slice(0, -2);
+    const headers = headerText.split("\r\n").reduce((acc, line) => {
+      const index = line.indexOf(":");
+      if (index > 0) {
+        const key = line.slice(0, index).trim().toLowerCase();
+        acc[key] = line.slice(index + 1).trim();
+      }
+      return acc;
+    }, {});
+
+    const disposition = parseContentDisposition(headers["content-disposition"]);
+    if (!disposition.name) continue;
+
+    if (disposition.filename) {
+      files.push({
+        name: disposition.name,
+        filename: disposition.filename,
+        contentType: headers["content-type"] || "application/octet-stream",
+        buffer: Buffer.from(dataText, "binary"),
+      });
+    } else {
+      fields[disposition.name] = Buffer.from(dataText, "binary").toString("utf8");
+    }
+  }
+
+  return { fields, files };
+}
+
+function parseContentDisposition(value = "") {
+  const result = {};
+  value
+    .split(";")
+    .map((item) => item.trim())
+    .forEach((item, index) => {
+      if (index === 0) return;
+      const [key, raw] = item.split("=");
+      if (!key) return;
+      const normalized = raw ? raw.trim().replace(/^"|"$/g, "") : "";
+      result[key.trim().toLowerCase()] = normalized;
+    });
+  return result;
 }
 
 function normalizeRequestPath(pathname) {
@@ -608,6 +798,23 @@ function serializeCategory(row) {
 }
 
 function serializeMovement(row) {
+  const receiptStoredName = row.receiptStoredName || row.receipt_stored_name || null;
+  const receiptOriginalName = row.receiptOriginalName || row.receipt_original_name || null;
+  const receiptMimeType = row.receiptMimeType || row.receipt_mime_type || null;
+  const receiptSize = row.receiptSize || row.receipt_size || null;
+  const receiptUploadedAt = row.receiptUploadedAt || row.receipt_uploaded_at || null;
+  const receipt = receiptStoredName
+    ? {
+        storedName: receiptStoredName,
+        originalName: receiptOriginalName,
+        mimeType: receiptMimeType,
+        size: Number(receiptSize || 0),
+        uploadedAt: receiptUploadedAt,
+        url: `/api/movements/${row.id}/receipt`,
+        kind: receiptKindForMime(receiptMimeType),
+      }
+    : null;
+
   return {
     id: row.id,
     type: row.type,
@@ -618,6 +825,7 @@ function serializeMovement(row) {
     description: row.description,
     date: row.date,
     sourceKey: row.sourceKey,
+    receipt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -920,6 +1128,120 @@ function deleteGoalById(userId, cycleId, goalId) {
   return goal;
 }
 
+function listAllowedReceiptInfo(file) {
+  if (!file) return null;
+  const mimeType = isReceiptSupported(file.contentType, file.filename);
+  if (!mimeType) {
+    const error = new Error("invalid_receipt_type");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const maxSize = receiptKindForMime(mimeType) === "pdf" ? RECEIPT_LIMITS.pdf : RECEIPT_LIMITS.image;
+  if (!Number.isFinite(file.buffer?.length) || file.buffer.length <= 0 || file.buffer.length > maxSize) {
+    const error = new Error(file.buffer?.length > maxSize ? "receipt_too_large" : "invalid_receipt");
+    error.statusCode = file.buffer?.length > maxSize ? 413 : 400;
+    throw error;
+  }
+
+  return {
+    mimeType,
+    originalName: String(file.filename || "comprovante").trim() || "comprovante",
+    size: file.buffer.length,
+    kind: receiptKindForMime(mimeType),
+  };
+}
+
+function replaceMovementReceipt(userId, movementId, file) {
+  const current = statements.findActiveMovementById.get(movementId, userId);
+  if (!current) {
+    const exists = statements.findMovementById.get(movementId, userId);
+    if (exists) {
+      const error = new Error("cycle_closed");
+      error.statusCode = 409;
+      throw error;
+    }
+    const error = new Error("movement_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (current.type !== "expense") {
+    const error = new Error("receipt_not_allowed");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const info = listAllowedReceiptInfo(file);
+  const storedName = buildReceiptStoredName(movementId, info.mimeType);
+  const targetPath = getReceiptFilePath(storedName);
+  const previous = statements.findMovementById.get(movementId, userId);
+  const previousPath = previous?.receipt_stored_name ? getReceiptFilePath(previous.receipt_stored_name) : "";
+  const timestamp = nowIso();
+
+  fs.writeFileSync(targetPath, file.buffer);
+  try {
+    statements.updateMovementReceipt.run(
+      storedName,
+      info.originalName,
+      info.mimeType,
+      info.size,
+      timestamp,
+      timestamp,
+      movementId,
+      userId,
+    );
+    deleteFileIfExists(previousPath);
+  } catch (error) {
+    deleteFileIfExists(targetPath);
+    throw error;
+  }
+
+  return statements.findMovementById.get(movementId, userId);
+}
+
+function clearMovementReceiptById(userId, movementId) {
+  const current = statements.findMovementById.get(movementId, userId);
+  if (!current) {
+    const error = new Error("movement_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const previousPath = current.receipt_stored_name ? getReceiptFilePath(current.receipt_stored_name) : "";
+  statements.clearMovementReceipt.run(nowIso(), movementId, userId);
+  deleteFileIfExists(previousPath);
+  return statements.findMovementById.get(movementId, userId);
+}
+
+function getMovementReceiptFile(userId, movementId) {
+  const current = statements.findMovementById.get(movementId, userId);
+  if (!current) {
+    const error = new Error("movement_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (!current.receipt_stored_name) {
+    const error = new Error("receipt_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const filePath = getReceiptFilePath(current.receipt_stored_name);
+  if (!fs.existsSync(filePath)) {
+    const error = new Error("receipt_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return {
+    filePath,
+    mimeType: current.receipt_mime_type || "application/octet-stream",
+    fileName: current.receipt_original_name || "comprovante",
+  };
+}
+
 function findCategoryForUserOrThrow(userId, categoryId) {
   const category = statements.findCategoryById.get(categoryId, userId);
   if (!category) {
@@ -1001,6 +1323,11 @@ function upsertMovement(userId, body, existingId = null) {
     description,
     movementDate: date,
     sourceKey,
+    receiptStoredName: null,
+    receiptOriginalName: null,
+    receiptMimeType: null,
+    receiptSize: null,
+    receiptUploadedAt: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   });
@@ -1306,9 +1633,89 @@ function handleMovements(request, response, context, pathname, method, body) {
   }
 
   if (method === "DELETE") {
+    const receiptPath = current.receipt_stored_name ? getReceiptFilePath(current.receipt_stored_name) : "";
     statements.deleteMovement.run(movementId, userId);
+    deleteFileIfExists(receiptPath);
     const currentCycle = ensureCurrentCycle(userId);
     sendJson(response, 200, { ok: true, movements: listMovementsByCycle(userId, currentCycle.id) });
+    return;
+  }
+
+  sendJson(response, 405, { error: "method_not_allowed" });
+}
+
+async function handleMovementReceipt(request, response, context, pathname, method) {
+  const userId = context.user.id;
+  const match = pathname.match(/^\/api\/movements\/([^/]+)\/receipt$/);
+  if (!match) {
+    sendJson(response, 404, { error: "not_found" });
+    return;
+  }
+
+  const movementId = decodeURIComponent(match[1]);
+
+  if (method === "GET") {
+    try {
+      const file = getMovementReceiptFile(userId, movementId);
+      streamFile(response, file.filePath, file.mimeType, file.fileName);
+    } catch (error) {
+      sendJson(response, error.statusCode || 404, {
+        error: error.message || "receipt_not_found",
+      });
+    }
+    return;
+  }
+
+  const current = statements.findActiveMovementById.get(movementId, userId);
+  if (!current) {
+    const exists = statements.findMovementById.get(movementId, userId);
+    if (exists) {
+      sendJson(response, 409, { error: "cycle_closed", message: "Lancamentos de ciclos fechados sao somente leitura." });
+      return;
+    }
+    sendJson(response, 404, { error: "not_found" });
+    return;
+  }
+
+  if (current.type !== "expense") {
+    sendJson(response, 409, { error: "receipt_not_allowed", message: "Comprovante so pode ser anexado em saídas." });
+    return;
+  }
+
+  if (method === "DELETE") {
+    const updated = clearMovementReceiptById(userId, movementId);
+    sendJson(response, 200, { ok: true, movement: serializeMovement(updated), movements: listMovementsByCycle(userId, current.cycle_id) });
+    return;
+  }
+
+  if (method === "POST") {
+    const contentType = String(request.headers["content-type"] || "");
+    if (!contentType.toLowerCase().includes("multipart/form-data")) {
+      sendJson(response, 415, { error: "invalid_content_type" });
+      return;
+    }
+
+    const raw = await readBufferBody(request, 12 * 1024 * 1024);
+    const { files } = parseMultipartFormData(raw, contentType);
+    const file = files.find((item) => item.name === "file") || files[0];
+    if (!file) {
+      sendJson(response, 400, { error: "missing_file", message: "Envie um arquivo válido." });
+      return;
+    }
+
+    try {
+      const updated = replaceMovementReceipt(userId, movementId, file);
+      sendJson(response, 200, {
+        ok: true,
+        movement: serializeMovement(updated),
+        movements: listMovementsByCycle(userId, current.cycle_id),
+      });
+    } catch (error) {
+      sendJson(response, error.statusCode || 500, {
+        error: error.message || "internal_error",
+        message: error.message || "Unexpected error",
+      });
+    }
     return;
   }
 
@@ -1535,6 +1942,10 @@ const server = http.createServer(async (request, response) => {
     if (pathname.startsWith("/api/movements")) {
       const context = requireAuth(request, response);
       if (!context) return;
+      if (/^\/api\/movements\/[^/]+\/receipt$/.test(pathname)) {
+        await handleMovementReceipt(request, response, context, pathname, method);
+        return;
+      }
       const body = method === "GET" || method === "DELETE" ? {} : await readJsonBody(request);
       handleMovements(request, response, context, pathname, method, body);
       return;

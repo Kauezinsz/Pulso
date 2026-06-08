@@ -972,6 +972,10 @@ h2 {
   font-weight: 700;
 }
 
+.text-button.danger {
+  color: var(--red);
+}
+
 .movement-list,
 .insight-stack,
 .category-bars {
@@ -980,6 +984,8 @@ h2 {
 }
 
 .movement-item {
+  position: relative;
+  z-index: 0;
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) auto;
   gap: 12px;
@@ -998,6 +1004,14 @@ h2 {
 .movement-item.removing {
   opacity: 0;
   transform: translateX(16px) scale(0.98);
+}
+
+.movement-item:has(.row-actions[open]) {
+  z-index: 12;
+}
+
+.movement-item.has-actions-open {
+  z-index: 12;
 }
 
 .movement-icon {
@@ -1053,6 +1067,27 @@ h2 {
   white-space: nowrap;
 }
 
+.movement-receipt {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 7px;
+}
+
+.receipt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(46, 231, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(46, 231, 255, 0.07);
+  color: var(--cyan);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .income .movement-value {
   color: var(--green);
 }
@@ -1066,6 +1101,7 @@ h2 {
   display: flex;
   justify-content: flex-end;
   margin-top: 8px;
+  z-index: 1;
 }
 
 .row-actions summary {
@@ -1100,11 +1136,15 @@ h2 {
   background: rgba(46, 231, 255, 0.07);
 }
 
+.row-actions[open] {
+  z-index: 20;
+}
+
 .action-menu {
   position: absolute;
   top: 30px;
   right: 0;
-  z-index: 4;
+  z-index: 50;
   display: grid;
   min-width: 116px;
   padding: 5px;
@@ -1565,6 +1605,14 @@ h2 {
   transition: transform 0.22s ease;
 }
 
+#movement-sheet .movement-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: min(calc(100dvh - 32px), 760px);
+  overflow: hidden;
+}
+
 .cycle-form,
 .cycle-detail-form {
   display: grid;
@@ -1600,6 +1648,26 @@ h2 {
   font-size: 1.45rem;
 }
 
+#movement-sheet .grabber,
+#movement-sheet .sheet-header,
+#movement-sheet .primary-action {
+  flex: 0 0 auto;
+}
+
+.movement-form-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  margin-right: -2px;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.movement-form-body::-webkit-scrollbar {
+  display: none;
+}
+
 .type-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1611,6 +1679,137 @@ h2 {
   display: grid;
   gap: 8px;
   margin-top: 12px;
+}
+
+.receipt-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(46, 231, 255, 0.12);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.receipt-panel[hidden] {
+  display: none;
+}
+
+.receipt-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.receipt-panel-head p {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.receipt-preview-wrap {
+  display: grid;
+  gap: 10px;
+}
+
+.receipt-empty,
+.receipt-preview {
+  border: 1px solid rgba(198, 216, 232, 0.08);
+  border-radius: 18px;
+  background: rgba(4, 14, 25, 0.76);
+}
+
+.receipt-empty {
+  display: grid;
+  gap: 4px;
+  padding: 13px 14px;
+}
+
+.receipt-empty strong {
+  font-size: 0.88rem;
+}
+
+.receipt-empty span {
+  color: var(--soft);
+  font-size: 0.8rem;
+}
+
+.receipt-preview {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+}
+
+.receipt-preview-media {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.receipt-preview-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.receipt-pdf-mark {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(255, 111, 145, 0.12), rgba(46, 231, 255, 0.06));
+  color: var(--red);
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.receipt-preview-copy {
+  min-width: 0;
+}
+
+.receipt-preview-copy strong,
+.receipt-preview-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.receipt-preview-copy strong {
+  font-size: 0.9rem;
+}
+
+.receipt-preview-copy span {
+  margin-top: 4px;
+  color: var(--soft);
+  font-size: 0.79rem;
+}
+
+.receipt-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.receipt-actions .secondary-action.compact,
+.receipt-actions .text-button {
+  min-height: 32px;
+  padding-inline: 10px;
+}
+
+.receipt-actions .text-button {
+  min-height: 32px;
+  text-align: left;
 }
 
 .field span {
@@ -1858,6 +2057,10 @@ h2 {
   color: #02111d;
   font-weight: 900;
   transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+#movement-sheet .primary-action {
+  margin-top: 14px;
 }
 
 .primary-action:hover {
@@ -2307,7 +2510,7 @@ body.has-hover .category-row:hover {
   }
 
   .movement-form {
-    width: min(100%, 560px);
+    width: min(100%, 640px);
   }
 
   .category-form {
@@ -2324,6 +2527,34 @@ body.has-hover .category-row:hover {
 
   .cycle-detail-form {
     width: min(100%, 760px);
+  }
+
+  #movement-sheet .movement-form {
+    max-height: min(calc(100dvh - 56px), 760px);
+  }
+
+  .receipt-panel {
+    padding: 14px;
+  }
+
+  .receipt-preview {
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .receipt-preview-media {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+  }
+
+  .receipt-pdf-mark {
+    border-radius: 16px;
+  }
+
+  .receipt-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .tab-summary {
@@ -2580,5 +2811,43 @@ body.has-hover .category-row:hover {
 
   .goal-hero .primary-action.compact {
     width: fit-content;
+  }
+
+  #movement-sheet .movement-form {
+    width: min(100%, 520px);
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  .movement-form-body {
+    padding-right: 0;
+    margin-right: 0;
+  }
+
+  .receipt-panel {
+    padding: 11px;
+    gap: 9px;
+  }
+
+  .receipt-panel-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .receipt-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .receipt-actions .secondary-action.compact,
+  .receipt-actions .text-button {
+    min-height: 34px;
+  }
+
+  .receipt-preview {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .receipt-preview-media {
+    width: 56px;
+    height: 56px;
   }
 }
