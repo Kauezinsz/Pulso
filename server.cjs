@@ -29,6 +29,12 @@ const defaultCategoriesByType = {
   expense: ["alimentação", "transporte", "moradia", "contas", "lazer", "saúde", "compras", "trabalho", "outros"],
 };
 
+function withAppBasePath(pathname) {
+  if (!appBasePath || appBasePath === "/") return pathname;
+  if (pathname.startsWith(appBasePath)) return pathname;
+  return `${appBasePath}${pathname}`;
+}
+
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -810,7 +816,7 @@ function serializeMovement(row) {
         mimeType: receiptMimeType,
         size: Number(receiptSize || 0),
         uploadedAt: receiptUploadedAt,
-        url: `/api/movements/${row.id}/receipt`,
+        url: withAppBasePath(`/api/movements/${row.id}/receipt`),
         kind: receiptKindForMime(receiptMimeType),
       }
     : null;

@@ -52,6 +52,8 @@ const state = {
     mode: "",
     existing: null,
     removeExisting: false,
+    processing: false,
+    selectionToken: 0,
   },
   categories: cloneDefaultCategories(),
   categoryRecords: {
@@ -324,995 +326,10 @@ async function submitLogin(event) {
   }
 }
 
-async function submitRegister(event) {
-  event.preventDefault();
-  try {
-    setAuthMessage("Criando sua conta...");
-    await apiRequest("/auth/register", {
-      method: "POST",
-      body: {
-        email: elements.registerEmail.value,
-        password: elements.registerPassword.value,
-      },
-    });
-    await bootApp();
-    setAuthMessage("");
-  } catch (error) {
-    setAuthMessage(authErrorMessage(error));
-  }
-}
-
-async function logout() {
-  try {
-    await apiRequest("/auth/logout", { method: "POST" });
-  } catch {
-    // logout local continua
-  }
-
-  state.user = null;
-  state.currentCycle = null;
-  state.cycles = [];
-  state.cycleDetail = null;
-  state.goals = [];
-  state.movements = [];
-  state.categories = cloneDefaultCategories();
-  state.categoryRecords = { income: [], expense: [] };
-  state.selectedCategory = "";
-  state.authStatus = "guest";
-  state.pendingCloseCycle = false;
-  state.pendingDeleteGoal = "";
-  clearTimeout(requestGoalDelete.timeout);
-  setAuthMode("guest");
-  updateAuthShell();
-  setAuthTab("login");
-  closeCycleSheet();
-  closeCycleDetailSheet();
-  closeGoalSheet();
-  closeGoalAmountSheet();
-  render();
-}
-
-function setAuthMessage(message) {
-  elements.authMessage.textContent = message;
-}
-
-function getAppBasePath() {
-  const { pathname } = window.location;
-  return pathname.startsWith("/pulso") ? "/pulso" : "";
-}
-
-function resolveAppUrl(path) {
-  if (!path || !path.startsWith("/")) return path;
-  const basePath = getAppBasePath();
-  if (!basePath) return path;
-  if (path === basePath || path.startsWith(`${basePath}/`)) return path;
-  return `${basePath}${path}`;
-}
-
-function authErrorMessage(error) {
-  if (!error) return "Nao foi possivel continuar.";
-  if (error.code === "email_in_use") return "Esse e-mail ja esta em uso.";
-  if (error.code === "invalid_credentials") return "E-mail ou senha invalidos.";
-  if (error.code === "unauthorized") return "Sua sessao expirou. Entre novamente.";
-  if (error.code === "goal_exists") return "Já existe uma meta com esse nome neste ciclo.";
-  if (error.code === "invalid_goal") return "Confira o nome e o valor alvo da meta.";
-  if (error.code === "goal_target_too_low") return "O valor alvo não pode ficar abaixo do que já foi guardado.";
-  if (error.code === "insufficient_goal_balance") return "Não há saldo disponível suficiente para guardar nessa meta.";
-  if (error.code === "goal_insufficient_saved") return "Não há valor suficiente guardado nessa meta.";
-  if (error.code === "invalid_goal_amount") return "Informe um valor válido.";
-  if (error.code === "goal_not_found") return "Não encontramos essa meta.";
-  if (error.code === "invalid_receipt_type") return "Use uma imagem JPG, JPEG, PNG, WEBP ou PDF.";
-  if (error.code === "receipt_too_large") return "O arquivo excede o tamanho permitido.";
-  if (error.code === "invalid_receipt") return "Selecione um comprovante v�lido.";
-  if (error.code === "receipt_not_allowed") return "Comprovante s� pode ser anexado em sa�das.";
-  if (error.code === "receipt_not_found") return "N�o encontramos esse comprovante.";
-  if (error.code === "invalid_content_type") return "Tente anexar o comprovante novamente.";
-  if (error.code === "missing_file") return "Escolha um arquivo para anexar.";
-  return error.message || "Nao foi possivel continuar.";
-}
-
-function handleUnauthorizedError(error) {
-  if (error?.code !== "unauthorized") return false;
-  void logout();
-  return true;
-}
-
-async function apiRequest(url, options = {}) {
-  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
-  const response = await fetch(resolveAppUrl(url), {
-    method: options.method || "GET",
-    credentials: "include",
-    headers: {
-      ...(options.body && !isFormData ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
-    body: options.body
-      ? isFormData
-        ? options.body
-        : JSON.stringify(options.body)
-      : undefined,
-  });
-
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) {
-    const error = new Error(payload?.message || payload?.error || response.statusText || "Request failed");
-    error.code = payload?.error || "request_failed";
-    error.status = response.status;
-    throw error;
-  }
-  return payload;
-}
-
-async function loadUserData() {
-  const bootstrap = await apiRequest("/api/bootstrap");
-  state.user = bootstrap.user;
-  state.currentCycle = bootstrap.currentCycle || null;
-  state.cycles = Array.isArray(bootstrap.cycles) ? bootstrap.cycles : [];
-  state.cycleDetail = null;
-  state.goals = normalizeGoalsPayload(bootstrap.goals);
-  state.pendingDeleteGoal = "";
-  applyCategoryPayload(bootstrap.categories);
-  state.movements = normalizeMovementsPayload(bootstrap.movements);
-  if (!getCategoriesForType(state.formType).includes(state.selectedCategory)) {
-    state.selectedCategory = "";
-  }
-  updateCategoryField();
-}
-
-function hasLegacyLocalData() {
-  try {
-    const movements = localStorage.getItem(STORAGE_KEY);
-    const categories = localStorage.getItem(CATEGORY_STORAGE_KEY);
-    return Boolean((movements && movements !== "[]") || (categories && categories !== "{}"));
-  } catch {
-    return false;
-  }
-}
-
-function getLegacySnapshot() {
-  try {
-    const movements = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    const categories = JSON.parse(localStorage.getItem(CATEGORY_STORAGE_KEY) || "{}");
-    return {
-      movements: Array.isArray(movements) ? movements : [],
-      categories: {
-        income: Array.isArray(categories.income) ? categories.income : [],
-        expense: Array.isArray(categories.expense) ? categories.expense : [],
-      },
-    };
-  } catch {
-    return { movements: [], categories: { income: [], expense: [] } };
-  }
-}
-
-function maybeOfferMigration() {
-  if (state.authStatus !== "authenticated") return;
-  if (!hasLegacyLocalData()) return;
-
-  const skipped = localStorage.getItem(SKIPPED_MIGRATION_KEY);
-  const imported = localStorage.getItem(MIGRATION_FLAG_KEY);
-  if (imported || skipped === state.user?.email) return;
-
-  state.migrationVisible = true;
-  elements.migrationCopy.textContent = "Encontramos dados salvos neste aparelho. Deseja importar para sua conta?";
-  elements.migrationNote.textContent = "Isso não apaga os dados locais de origem até a importacao concluir.";
-  elements.migrationSheet.classList.add("open");
-  elements.migrationSheet.setAttribute("aria-hidden", "false");
-}
-
-function dismissMigrationPrompt() {
-  state.migrationVisible = false;
-  if (state.user?.email) {
-    localStorage.setItem(SKIPPED_MIGRATION_KEY, state.user.email);
-  }
-  closeMigrationSheet();
-}
-
-function closeMigrationSheet() {
-  elements.migrationSheet.classList.remove("open");
-  elements.migrationSheet.setAttribute("aria-hidden", "true");
-}
-
-function openCloseCycleSheet() {
-  closeGoalSheet();
-  closeGoalAmountSheet();
-  const currentCycle = state.currentCycle;
-  if (!currentCycle) return;
-
-  const totals = getTotals();
-  elements.cycleCloseCopy.textContent = `Você vai encerrar ${formatCycleTitle(currentCycle)}. Entradas ${currency.format(totals.income)}, saídas ${currency.format(totals.expense)} e saldo ${currency.format(totals.balance)} seguem salvos no histórico.`;
-  elements.cycleCloseNote.textContent = "Nenhum lançamento é apagado. Um novo ciclo vazio será aberto em seguida.";
-  elements.cycleCloseSheet.classList.add("open");
-  elements.cycleCloseSheet.setAttribute("aria-hidden", "false");
-}
-
-function closeCycleSheet() {
-  elements.cycleCloseSheet.classList.remove("open");
-  elements.cycleCloseSheet.setAttribute("aria-hidden", "true");
-}
-
-async function confirmCloseCycle() {
-  if (state.pendingCloseCycle) return;
-
-  try {
-    state.pendingCloseCycle = true;
-    elements.confirmCloseCycle.disabled = true;
-    elements.confirmCloseCycle.textContent = "Fechando...";
-    const result = await apiRequest("/api/cycles/close", { method: "POST" });
-    await loadUserData();
-    render({ pulse: true });
-    closeCycleSheet();
-    setActiveTab("summary");
-    showToast(result?.closedCycle ? "Ciclo fechado e novo ciclo aberto" : "Ciclo fechado", "success");
-  } catch (error) {
-    if (!handleUnauthorizedError(error)) {
-      showToast(authErrorMessage(error), "neutral");
-    }
-  } finally {
-    state.pendingCloseCycle = false;
-    elements.confirmCloseCycle.disabled = false;
-    elements.confirmCloseCycle.textContent = "Fechar agora";
-  }
-}
-
-function renderCycles() {
-  const closedCycles = state.cycles.filter((cycle) => cycle.status === "closed");
-  const activeCycle = state.currentCycle;
-  const totals = getTotals();
-  const availableBalance = getAvailableBalance(totals);
-
-  elements.cycleTabCurrentLabel.textContent = activeCycle ? formatCycleTitle(activeCycle) : "Ciclo atual";
-  elements.cycleTabCurrentCopy.textContent = activeCycle
-    ? `Aberto em ${formatDate(activeCycle.startedAt)}. ${currency.format(availableBalance)} de saldo disponível no ciclo ativo.`
-    : "Feche o ciclo atual quando quiser virar o período.";
-
-  elements.closedCyclesCount.textContent = `${closedCycles.length} ciclo${closedCycles.length === 1 ? "" : "s"}`;
-  elements.cycleList.innerHTML = closedCycles.length
-    ? closedCycles.map(renderCycleCard).join("")
-    : renderEmptyState("Nenhum ciclo fechado", "Quando você fechar o ciclo atual, ele aparece aqui em modo somente leitura.");
-
-  elements.cycleList.querySelectorAll("[data-open-cycle]").forEach((button) => {
-    button.addEventListener("click", () => {
-      void openCycleDetail(button.dataset.openCycle);
-    });
-  });
-}
-
-function renderCycleCard(cycle) {
-  const balanceTone = cycle.balance >= 0 ? "good" : "alert";
-  const period = formatCyclePeriod(cycle);
-  return `<article class="cycle-card closed ${balanceTone}">
-    <div>
-      <span class="mini-label">${cycle.status === "active" ? "Ativo" : "Fechado"}</span>
-      <strong>${escapeHtml(cycle.label || "Ciclo")}</strong>
-      <p>${escapeHtml(period)} · ${cycle.movementCount} movimento${cycle.movementCount === 1 ? "" : "s"}</p>
-    </div>
-    <div class="cycle-card-side">
-      <strong>${currency.format(cycle.balance)}</strong>
-      <button class="text-button" type="button" data-open-cycle="${cycle.id}">Abrir</button>
-    </div>
-  </article>`;
-}
-
-async function openCycleDetail(cycleId) {
-  try {
-    closeGoalSheet();
-    closeGoalAmountSheet();
-    const payload = await apiRequest(`/api/cycles/${encodeURIComponent(cycleId)}`);
-    state.cycleDetail = {
-      cycle: payload.cycle,
-      movements: normalizeMovementsPayload(payload.movements),
-    };
-    renderCycleDetail();
-    elements.cycleDetailSheet.classList.add("open");
-    elements.cycleDetailSheet.setAttribute("aria-hidden", "false");
-  } catch (error) {
-    if (!handleUnauthorizedError(error)) {
-      showToast(authErrorMessage(error), "neutral");
-    }
-  }
-}
-
-function closeCycleDetailSheet() {
-  elements.cycleDetailSheet.classList.remove("open");
-  elements.cycleDetailSheet.setAttribute("aria-hidden", "true");
-}
-
-function renderCycleDetail() {
-  const detail = state.cycleDetail;
-  if (!detail) return;
-
-  const cycle = detail.cycle;
-  const movements = detail.movements;
-  elements.cycleDetailTitle.textContent = formatCycleTitle(cycle);
-  elements.cycleDetailPeriod.textContent = formatCyclePeriod(cycle);
-  elements.cycleDetailBalance.textContent = currency.format(cycle.balance);
-  elements.cycleDetailCount.textContent = String(cycle.movementCount || movements.length);
-  elements.cycleDetailIncome.textContent = currency.format(cycle.incomeTotal || 0);
-  elements.cycleDetailExpense.textContent = currency.format(cycle.expenseTotal || 0);
-  elements.cycleDetailList.innerHTML = renderMovementList(movements, {
-    empty: "Este ciclo não tem lançamentos.",
-  });
-}
-
-function renderGoals(totals) {
-  const reserved = getGoalSavedTotal();
-  const available = getAvailableBalance(totals, reserved);
-  const goalCount = state.goals.length;
-
-  if (elements.goalsHeroAvailable) {
-    elements.goalsHeroAvailable.textContent = `${currency.format(available)} disponíveis`;
-  }
-  if (elements.goalsHeroCopy) {
-    elements.goalsHeroCopy.textContent = goalCount
-      ? `Você já guardou ${currency.format(reserved)} em ${goalCount} meta${goalCount === 1 ? "" : "s"} neste ciclo.`
-      : "Separe parte do saldo do ciclo e acompanhe o progresso de cada meta.";
-  }
-  if (elements.goalsSavedTotal) {
-    elements.goalsSavedTotal.textContent = currency.format(reserved);
-  }
-  if (elements.goalsCountInline) {
-    elements.goalsCountInline.textContent = String(goalCount);
-  }
-  if (elements.goalsCount) {
-    elements.goalsCount.textContent = `${goalCount} meta${goalCount === 1 ? "" : "s"}`;
-  }
-
-  if (!state.pendingDeleteGoal) {
-    elements.goalsFeedback.textContent = "";
-    elements.goalsFeedback.classList.remove("show");
-  }
-
-  elements.goalList.innerHTML = state.goals.length
-    ? state.goals.map((goal) => renderGoalCard(goal, available)).join("")
-    : renderEmptyState("Nenhuma meta ainda", "Crie um cofrinho para separar parte do saldo do ciclo.");
-}
-
-function renderGoalCard(goal, availableBalance) {
-  const progress = goal.targetAmount > 0 ? Math.round((goal.savedAmount / goal.targetAmount) * 100) : 0;
-  const fill = Math.min(progress, 100);
-  const complete = goal.savedAmount >= goal.targetAmount;
-  const pending = state.pendingDeleteGoal === goal.id;
-
-  return `<article class="goal-card ${complete ? "complete" : ""} ${pending ? "pending-delete" : ""}">
-    <div class="goal-head">
-      <div class="goal-copy">
-        <span class="mini-label">Meta</span>
-        <strong>${escapeHtml(capitalize(goal.name))}</strong>
-        <p>Guardado ${currency.format(goal.savedAmount)} · Alvo ${currency.format(goal.targetAmount)}</p>
-      </div>
-      <div class="goal-progress-copy">
-        <strong>${progress >= 100 ? "100%+" : `${progress}%`}</strong>
-        <span>${complete ? "Concluída" : "Em andamento"}</span>
-      </div>
-    </div>
-    <div class="goal-track" aria-hidden="true"><div class="goal-fill" style="width:${fill}%"></div></div>
-    <div class="goal-actions">
-      <button class="secondary-action compact goal-action" type="button" data-goal-save="${goal.id}" ${availableBalance <= 0 ? "disabled" : ""}>Guardar</button>
-      <button class="secondary-action compact goal-action" type="button" data-goal-remove="${goal.id}" ${goal.savedAmount <= 0 ? "disabled" : ""}>Remover</button>
-    </div>
-    <div class="goal-meta-actions">
-      <button class="text-button" type="button" data-goal-edit="${goal.id}">Editar</button>
-      <button class="text-button ${pending ? "pending" : ""}" type="button" data-goal-delete="${goal.id}">${pending ? "Confirmar" : "Excluir"}</button>
-    </div>
-  </article>`;
-}
-
-function openGoalSheet(goal = null) {
-  closeSheet();
-  closeCategorySheet();
-  closeCycleSheet();
-  closeCycleDetailSheet();
-  state.pendingDeleteGoal = "";
-  clearTimeout(requestGoalDelete.timeout);
-  if (elements.goalsFeedback) {
-    elements.goalsFeedback.textContent = "";
-    elements.goalsFeedback.classList.remove("show");
-  }
-  elements.goalForm.reset();
-  elements.goalId.value = "";
-  elements.goalSheetTitle.textContent = "Nova meta";
-  elements.saveGoal.textContent = "Salvar meta";
-
-  if (goal) {
-    elements.goalId.value = goal.id;
-    elements.goalSheetTitle.textContent = "Editar meta";
-    elements.saveGoal.textContent = "Salvar alterações";
-    elements.goalName.value = goal.name;
-    elements.goalTarget.value = formatMoneyInput(goal.targetAmount);
-  }
-
-  elements.goalSheet.classList.add("open");
-  elements.goalSheet.setAttribute("aria-hidden", "false");
-  setTimeout(() => elements.goalName.focus(), 120);
-}
-
-function closeGoalSheet() {
-  elements.goalSheet.classList.remove("open");
-  elements.goalSheet.setAttribute("aria-hidden", "true");
-}
-
-function openGoalAmountSheet(goal, mode) {
-  if (!goal || !mode) return;
-  closeSheet();
-  closeCategorySheet();
-  closeCycleSheet();
-  closeCycleDetailSheet();
-  state.pendingDeleteGoal = "";
-  clearTimeout(requestGoalDelete.timeout);
-  if (elements.goalsFeedback) {
-    elements.goalsFeedback.textContent = "";
-    elements.goalsFeedback.classList.remove("show");
-  }
-  elements.goalAmountForm.reset();
-  elements.goalActionId.value = goal.id;
-  elements.goalActionMode.value = mode;
-  elements.goalAmountSheetTitle.textContent = mode === "remove" ? "Remover valor" : "Guardar valor";
-  elements.goalAmountSheetCopy.textContent = mode === "remove"
-    ? `Quanto você quer devolver de ${capitalize(goal.name)}?`
-    : `Quanto você quer guardar em ${capitalize(goal.name)}?`;
-  elements.goalAmountNote.textContent = mode === "remove"
-    ? `Guardado agora: ${currency.format(goal.savedAmount)}.`
-    : `Saldo disponível: ${currency.format(getAvailableBalance(getTotals()))}.`;
-  elements.confirmGoalAmount.textContent = mode === "remove" ? "Remover valor" : "Guardar valor";
-  elements.goalAmount.value = "";
-  elements.goalAmountSheet.classList.add("open");
-  elements.goalAmountSheet.setAttribute("aria-hidden", "false");
-  setTimeout(() => elements.goalAmount.focus(), 120);
-}
-
-function closeGoalAmountSheet() {
-  elements.goalAmountSheet.classList.remove("open");
-  elements.goalAmountSheet.setAttribute("aria-hidden", "true");
-}
-
-async function saveGoal(event) {
-  event.preventDefault();
-  const goalId = elements.goalId.value.trim();
-  const payload = {
-    name: normalizeGoalName(elements.goalName.value),
-    targetAmount: parseMoney(elements.goalTarget.value),
-  };
-
-  if (!payload.name || payload.targetAmount <= 0) {
-    showGoalFeedback("Informe um nome e um valor alvo válidos.");
-    return;
-  }
-
-  try {
-    if (goalId) {
-      await apiRequest(`/api/goals/${encodeURIComponent(goalId)}`, {
-        method: "PUT",
-        body: payload,
-      });
-      showToast("Meta atualizada", "success");
-    } else {
-      await apiRequest("/api/goals", {
-        method: "POST",
-        body: payload,
-      });
-      showToast("Meta criada", "success");
-    }
-
-    await loadUserData();
-    closeGoalSheet();
-    render({ pulse: true });
-  } catch (error) {
-    if (handleUnauthorizedError(error)) return;
-    showGoalFeedback(authErrorMessage(error));
-    showToast(authErrorMessage(error), "neutral");
-  }
-}
-
-async function submitGoalAmount(event) {
-  event.preventDefault();
-  const goalId = elements.goalActionId.value.trim();
-  const mode = elements.goalActionMode.value;
-  const goal = state.goals.find((item) => item.id === goalId);
-  if (!goal || !mode) return;
-
-  const amount = parseMoney(elements.goalAmount.value);
-  const available = getAvailableBalance(getTotals());
-
-  if (amount <= 0) {
-    showGoalFeedback("Informe um valor válido.");
-    return;
-  }
-
-  if (mode === "save" && amount > available) {
-    showGoalFeedback("Não há saldo disponível suficiente para guardar nessa meta.");
-    return;
-  }
-
-  if (mode === "remove" && amount > goal.savedAmount) {
-    showGoalFeedback("Não há valor suficiente guardado nessa meta.");
-    return;
-  }
-
-  try {
-    await apiRequest(`/api/goals/${encodeURIComponent(goalId)}/${mode}`, {
-      method: "POST",
-      body: { amount },
-    });
-    await loadUserData();
-    closeGoalAmountSheet();
-    render({ pulse: true });
-    showToast(mode === "save" ? "Valor guardado na meta" : "Valor devolvido ao saldo", "success");
-  } catch (error) {
-    if (handleUnauthorizedError(error)) return;
-    showGoalFeedback(authErrorMessage(error));
-    showToast(authErrorMessage(error), "neutral");
-  }
-}
-
-function requestGoalDelete(goal) {
-  if (!goal) return;
-
-  if (state.pendingDeleteGoal === goal.id) {
-    void deleteGoal(goal.id);
-    return;
-  }
-
-  state.pendingDeleteGoal = goal.id;
-  showGoalFeedback(goal.savedAmount > 0
-    ? "Toque novamente em Excluir para confirmar. O valor guardado volta ao saldo disponível."
-    : "Toque novamente em Excluir para confirmar.");
-  showToast("Confirme a exclusão", "neutral");
-  renderGoals(getTotals());
-
-  clearTimeout(requestGoalDelete.timeout);
-  requestGoalDelete.timeout = setTimeout(() => {
-    if (state.pendingDeleteGoal === goal.id) {
-      state.pendingDeleteGoal = "";
-      if (elements.goalsFeedback.textContent) {
-        elements.goalsFeedback.textContent = "";
-        elements.goalsFeedback.classList.remove("show");
-      }
-      renderGoals(getTotals());
-    }
-  }, 4200);
-}
-
-async function deleteGoal(goalId) {
-  try {
-    await apiRequest(`/api/goals/${encodeURIComponent(goalId)}`, { method: "DELETE" });
-    state.pendingDeleteGoal = "";
-    await loadUserData();
-    render({ pulse: true });
-    showToast("Meta removida", "neutral");
-  } catch (error) {
-    if (handleUnauthorizedError(error)) return;
-    state.pendingDeleteGoal = "";
-    renderGoals(getTotals());
-    showGoalFeedback(authErrorMessage(error));
-    showToast(authErrorMessage(error), "neutral");
-  }
-}
-
-function showGoalFeedback(message) {
-  if (!elements.goalsFeedback) return;
-  elements.goalsFeedback.textContent = message;
-  elements.goalsFeedback.classList.remove("show");
-  requestAnimationFrame(() => elements.goalsFeedback.classList.add("show"));
-}
-
-async function importLocalData() {
-  const snapshot = getLegacySnapshot();
-  if (!snapshot.movements.length && !snapshot.categories.income.length && !snapshot.categories.expense.length) {
-    dismissMigrationPrompt();
-    return;
-  }
-
-  try {
-    elements.importLocalData.disabled = true;
-    elements.importLocalData.textContent = "Importando...";
-    const result = await apiRequest("/api/import/local", {
-      method: "POST",
-      body: snapshot,
-    });
-
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(CATEGORY_STORAGE_KEY);
-    localStorage.setItem(MIGRATION_FLAG_KEY, state.user?.email || "1");
-    localStorage.removeItem(SKIPPED_MIGRATION_KEY);
-
-    await loadUserData();
-    render({ pulse: true });
-    showToast(`Dados importados (${result.importedMovements} lançamentos)`, "success");
-    dismissMigrationPrompt();
-  } catch (error) {
-    if (handleUnauthorizedError(error)) return;
-    showToast(authErrorMessage(error), "neutral");
-  } finally {
-    elements.importLocalData.disabled = false;
-    elements.importLocalData.textContent = "Importar agora";
-  }
-}
-
-function applyCategoryPayload(payload) {
-  const income = Array.isArray(payload?.income) ? payload.income : [];
-  const expense = Array.isArray(payload?.expense) ? payload.expense : [];
-  state.categoryRecords = {
-    income: income.map(normalizeCategoryRecord),
-    expense: expense.map(normalizeCategoryRecord),
-  };
-  state.categories = {
-    income: state.categoryRecords.income.map((item) => item.name),
-    expense: state.categoryRecords.expense.map((item) => item.name),
-  };
-}
-
-function normalizeCategoryRecord(item) {
-  return {
-    id: item.id,
-    type: item.type,
-    name: normalizeCategoryName(item.name),
-    slug: item.slug,
-    isDefault: Boolean(item.isDefault),
-  };
-}
-
-function normalizeMovementsPayload(items) {
-  return Array.isArray(items)
-    ? items.map((item) => ({
-        id: item.id,
-        type: item.type,
-        amount: Number(item.amount),
-        categoryId: item.categoryId,
-        category: normalizeCategoryName(item.categoryName || ""),
-        description: item.description,
-        date: item.date,
-        receipt: item.receipt
-          ? {
-              storedName: item.receipt.storedName,
-              originalName: item.receipt.originalName,
-              mimeType: item.receipt.mimeType,
-              size: Number(item.receipt.size || 0),
-              uploadedAt: item.receipt.uploadedAt,
-              url: item.receipt.url,
-              kind: item.receipt.kind,
-            }
-          : null,
-      }))
-    : [];
-}
-
-function normalizeGoalsPayload(items) {
-  return Array.isArray(items)
-    ? items.map((item) => ({
-        id: item.id,
-        cycleId: item.cycleId,
-        name: normalizeGoalName(item.name),
-        slug: item.slug,
-        targetAmount: Number(item.targetAmount || 0),
-        savedAmount: Number(item.savedAmount || 0),
-        remainingAmount: Number(item.remainingAmount || 0),
-        progress: Number(item.progress || 0),
-      }))
-    : [];
-}
-
-function bindEvents() {
-  elements.authTabs.forEach((button) => {
-    button.addEventListener("click", () => setAuthTab(button.dataset.authTab));
-  });
-
-  elements.loginForm.addEventListener("submit", (event) => {
-    void submitLogin(event);
-  });
-
-  elements.registerForm.addEventListener("submit", (event) => {
-    void submitRegister(event);
-  });
-
-  $$(".nav-tab").forEach((button) => {
-    button.addEventListener("click", () => setActiveTab(button.dataset.tab));
-  });
-
-  $$("[data-open-tab]").forEach((button) => {
-    button.addEventListener("click", () => setActiveTab(button.dataset.openTab));
-  });
-
-  $$(".filter-pill").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.activeFilter = button.dataset.filter;
-      $$(".filter-pill").forEach((pill) => pill.classList.toggle("active", pill === button));
-      renderHistory();
-    });
-  });
-
-  elements.analysisTypeButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      state.analysisType = button.dataset.analysisType;
-      state.activeAnalysisCategory = "";
-      elements.analysisTypeButtons.forEach((item) => item.classList.toggle("active", item === button));
-      renderAnalysis(getTotals());
-    });
-  });
-
-  elements.categoryBars.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-category-toggle]");
-    if (!button) return;
-    const category = button.dataset.categoryToggle;
-    if (!category) return;
-    state.activeAnalysisCategory = sameCategory(state.activeAnalysisCategory, category) ? "" : category;
-    renderAnalysis(getTotals());
-  });
-
-  $("#open-form").addEventListener("click", () => openSheet());
-  elements.categorySelect.addEventListener("click", openCategorySheet);
-  elements.receiptCamera.addEventListener("click", () => openReceiptPicker("camera"));
-  elements.receiptGallery.addEventListener("click", () => openReceiptPicker("image"));
-  elements.receiptPdf.addEventListener("click", () => openReceiptPicker("pdf"));
-  elements.receiptReplace.addEventListener("click", () => openReceiptPicker(state.receiptDraft.existing?.kind || state.receiptDraft.mode || "image"));
-  elements.receiptOpen.addEventListener("click", () => openCurrentReceipt());
-  elements.receiptRemove.addEventListener("click", () => removeReceiptSelection());
-  elements.receiptInput.addEventListener("change", () => {
-    const file = elements.receiptInput.files?.[0];
-    if (file) applyReceiptSelection(file);
-  });
-  elements.openCloseCycle.addEventListener("click", openCloseCycleSheet);
-  elements.openCloseCycleCta.addEventListener("click", openCloseCycleSheet);
-  elements.confirmCloseCycle.addEventListener("click", () => {
-    void confirmCloseCycle();
-  });
-
-  elements.openGoalSheet.addEventListener("click", () => openGoalSheet());
-  elements.goalList.addEventListener("click", (event) => {
-    const saveButton = event.target.closest("[data-goal-save]");
-    if (saveButton) {
-      const goal = state.goals.find((item) => item.id === saveButton.dataset.goalSave);
-      if (goal) openGoalAmountSheet(goal, "save");
-      return;
-    }
-
-    const removeButton = event.target.closest("[data-goal-remove]");
-    if (removeButton) {
-      const goal = state.goals.find((item) => item.id === removeButton.dataset.goalRemove);
-      if (goal) openGoalAmountSheet(goal, "remove");
-      return;
-    }
-
-    const editButton = event.target.closest("[data-goal-edit]");
-    if (editButton) {
-      const goal = state.goals.find((item) => item.id === editButton.dataset.goalEdit);
-      if (goal) openGoalSheet(goal);
-      return;
-    }
-
-    const deleteButton = event.target.closest("[data-goal-delete]");
-    if (deleteButton) {
-      const goal = state.goals.find((item) => item.id === deleteButton.dataset.goalDelete);
-      if (goal) {
-        void requestGoalDelete(goal);
-      }
-    }
-  });
-
-  elements.goalForm.addEventListener("submit", (event) => {
-    void saveGoal(event);
-  });
-
-  elements.goalAmountForm.addEventListener("submit", (event) => {
-    void submitGoalAmount(event);
-  });
-
-  $$("[data-close-cycle-sheet]").forEach((element) => {
-    element.addEventListener("click", closeCycleSheet);
-  });
-
-  $$("[data-close-goal-sheet]").forEach((element) => {
-    element.addEventListener("click", closeGoalSheet);
-  });
-
-  $$("[data-close-goal-amount-sheet]").forEach((element) => {
-    element.addEventListener("click", closeGoalAmountSheet);
-  });
-
-  $$("[data-close-cycle-detail]").forEach((element) => {
-    element.addEventListener("click", closeCycleDetailSheet);
-  });
-
-  $$("[data-close-sheet]").forEach((element) => {
-    element.addEventListener("click", closeSheet);
-  });
-
-  $$("[data-close-category-sheet]").forEach((element) => {
-    element.addEventListener("click", closeCategorySheet);
-  });
-
-  $$("[data-close-migration-sheet]").forEach((element) => {
-    element.addEventListener("click", dismissMigrationPrompt);
-  });
-
-  $$(".toggle-option").forEach((button) => {
-    button.addEventListener("click", () => setFormType(button.dataset.type));
-  });
-
-  elements.amount.addEventListener("input", () => {
-    elements.amount.value = sanitizeMoneyInput(elements.amount.value);
-  });
-  elements.amount.addEventListener("blur", () => {
-    const amount = parseMoney(elements.amount.value);
-    elements.amount.value = amount ? formatMoneyInput(amount) : "";
-  });
-  elements.amount.addEventListener("focus", () => {
-    elements.amount.select();
-  });
-
-  elements.form.addEventListener("submit", saveMovement);
-  elements.saveCategory.addEventListener("click", () => {
-    void saveNewCategory();
-  });
-  elements.newCategoryName.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void saveNewCategory();
-    }
-  });
-
-  elements.logoutButton.addEventListener("click", () => {
-    void logout();
-  });
-
-  elements.importLocalData.addEventListener("click", () => {
-    void importLocalData();
-  });
-
-  elements.skipLocalData.addEventListener("click", () => {
-    dismissMigrationPrompt();
-  });
-}
-
-function updateCategoryField() {
-  elements.categoryContext.textContent = state.formType === "income" ? "para entrada" : "para saída";
-  elements.category.value = state.selectedCategory;
-  elements.categorySelect.classList.toggle("has-value", Boolean(state.selectedCategory));
-  elements.categorySelectLabel.textContent = state.selectedCategory ? capitalize(state.selectedCategory) : "Escolher categoria";
-}
-
-function setActiveTab(tab) {
-  state.activeTab = tab;
-  $$(".nav-tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
-  $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tab}`));
-  const panel = $(`#tab-${tab}`);
-  elements.screenTitle.textContent = panel.dataset.title;
-  elements.screenPeriod.textContent = periodLabel(tab);
-}
-
-function openSheet(movement = null) {
-  closeGoalSheet();
-  closeGoalAmountSheet();
-  elements.form.reset();
-  elements.date.value = new Date().toISOString().slice(0, 10);
-  elements.movementId.value = "";
-  elements.formTitle.textContent = "Adicionar rápido";
-  resetReceiptDraft();
-  setFormType("expense", { preserveCategory: false });
-
-  if (movement) {
-    elements.formTitle.textContent = "Editar movimento";
-    elements.movementId.value = movement.id;
-    elements.amount.value = formatMoneyInput(movement.amount);
-    elements.description.value = movement.description;
-    elements.date.value = movement.date;
-    setFormType(movement.type, { preserveCategory: true });
-    selectCategory(movement.category);
-    setReceiptDraftFromMovement(movement);
-  }
-
-  elements.sheet.classList.add("open");
-  elements.sheet.setAttribute("aria-hidden", "false");
-  syncReceiptPanel();
-  setTimeout(() => elements.amount.focus(), 120);
-}
-
-function closeSheet() {
-  elements.sheet.classList.remove("open");
-  elements.sheet.setAttribute("aria-hidden", "true");
-  resetReceiptDraft();
-}
-
-function setFormType(type, options = {}) {
-  state.formType = type;
-  $$(".toggle-option").forEach((button) => button.classList.toggle("active", button.dataset.type === type));
-  const currentIsValid = getCategoriesForType(type).includes(state.selectedCategory);
-  if (!options.preserveCategory || !currentIsValid) {
-    state.selectedCategory = "";
-  }
-  if (type === "income" && state.receiptDraft.file) {
-    clearPendingReceiptFile();
-  }
-  updateCategoryField();
-  syncReceiptPanel();
-}
-
-function selectCategory(category) {
-  state.selectedCategory = category;
-  updateCategoryField();
-  renderCategoryList();
-}
-
-function resetReceiptDraft() {
-  if (state.receiptDraft.previewUrl) {
-    URL.revokeObjectURL(state.receiptDraft.previewUrl);
-  }
-  state.receiptDraft = {
-    file: null,
-    previewUrl: "",
-    mode: "",
-    existing: null,
-    removeExisting: false,
-  };
-  if (elements.receiptInput) {
-    elements.receiptInput.value = "";
-    elements.receiptInput.accept = "image/*,application/pdf";
-    elements.receiptInput.removeAttribute("capture");
-  }
-  syncReceiptPanel(true);
-}
-
-function setReceiptDraftFromMovement(movement) {
-  if (!movement) return;
-  state.receiptDraft.existing = movement.receipt || null;
-  state.receiptDraft.removeExisting = false;
-  syncReceiptPanel(true);
-}
-
-function clearPendingReceiptFile() {
-  if (state.receiptDraft.previewUrl) {
-    URL.revokeObjectURL(state.receiptDraft.previewUrl);
-  }
-  state.receiptDraft.file = null;
-  state.receiptDraft.previewUrl = "";
-  state.receiptDraft.mode = "";
-  if (elements.receiptInput) {
-    elements.receiptInput.value = "";
-    elements.receiptInput.accept = "image/*,application/pdf";
-    elements.receiptInput.removeAttribute("capture");
-  }
-}
-
-function syncReceiptPanel(force = false) {
-  if (!elements.receiptPanel) return;
-  const visible = state.formType === "expense";
-  elements.receiptPanel.hidden = !visible;
-  if (!visible) {
-    elements.receiptStatus.textContent = "";
-    elements.receiptHint.textContent = "Comprovante disponível apenas para saídas.";
-    return;
-  }
-
-  const current = state.receiptDraft.file
-    ? {
-        file: state.receiptDraft.file,
-        previewUrl: state.receiptDraft.previewUrl,
-        originalName: state.receiptDraft.file.name,
-        mimeType: state.receiptDraft.file.type,
-        kind: state.receiptDraft.mode === "pdf" ? "pdf" : "image",
-        pending: true,
-      }
-    : state.receiptDraft.removeExisting
-      ? null
-      : state.receiptDraft.existing;
-
-  elements.receiptStatus.textContent = current
-    ? state.receiptDraft.file
-      ? `Novo arquivo selecionado: ${state.receiptDraft.file.name}`
-      : `Comprovante salvo: ${state.receiptDraft.existing?.originalName || "arquivo"}`
-    : "Adicione uma imagem ou PDF ao lançamento.";
-
-  elements.receiptHint.textContent = current
-    ? "Você pode abrir, remover ou substituir este comprovante."
-    : "Imagem até 5 MB, PDF até 10 MB.";
-
-  elements.receiptPreview.innerHTML = renderReceiptPreview(current);
-  elements.receiptOpen.hidden = !current;
-  elements.receiptRemove.hidden = !current;
-  if (elements.receiptReplace) {
-    elements.receiptReplace.hidden = !current;
-  }
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  return `${Math.max(Math.round(bytes / 1024), 1)} KB`;
 }
 
 function renderReceiptPreview(receipt) {
@@ -1327,7 +344,7 @@ function renderReceiptPreview(receipt) {
   const label = escapeHtml(receipt.originalName || receipt.file?.name || "Comprovante");
   const size = receipt.file ? receipt.file.size : Number(receipt.size || 0);
   const sizeLabel = size ? formatFileSize(size) : "";
-  const url = receipt.previewUrl || receipt.url || "";
+  const url = resolveReceiptUrl(receipt.previewUrl || receipt.url || "");
 
   return `
     <div class="receipt-preview ${isPdf ? "pdf" : "image"}">
@@ -1343,12 +360,6 @@ function renderReceiptPreview(receipt) {
         <span>${isPdf ? "Documento PDF" : "Imagem"}${sizeLabel ? ` · ${sizeLabel}` : ""}</span>
       </div>
     </div>`;
-}
-
-function formatFileSize(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "";
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
-  return `${Math.max(Math.round(bytes / 1024), 1)} KB`;
 }
 
 function openReceiptPicker(mode) {
@@ -1369,16 +380,21 @@ function openReceiptPicker(mode) {
   elements.receiptInput.click();
 }
 
-function validateReceiptFile(file) {
+function validateReceiptFile(file, options = {}) {
   if (!file) return "Selecione um arquivo válido.";
   const mimeType = isReceiptMimeAllowed(file);
   if (!mimeType) return "Use uma imagem JPG, JPEG, PNG, WEBP ou um PDF.";
 
-  const limit = mimeType === "application/pdf" ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
-  if (file.size > limit) {
-    return mimeType === "application/pdf"
-      ? "O PDF deve ter até 10 MB."
-      : "A imagem deve ter até 5 MB.";
+  if (mimeType === "application/pdf") {
+    const pdfLimit = 10 * 1024 * 1024;
+    if (file.size > pdfLimit) {
+      return "O PDF deve ter até 10 MB.";
+    }
+    return "";
+  }
+
+  if (!options.allowLargeImage && file.size > 5 * 1024 * 1024) {
+    return "A imagem deve ter até 5 MB.";
   }
   return "";
 }
@@ -1394,24 +410,189 @@ function isReceiptMimeAllowed(file) {
   return "";
 }
 
-function applyReceiptSelection(file) {
-  const validation = validateReceiptFile(file);
-  if (validation) {
-    showToast(validation, "neutral");
-    if (elements.receiptStatus) elements.receiptStatus.textContent = validation;
+async function compressReceiptImage(file) {
+  const source = await loadReceiptImageSource(file);
+  const profiles = [
+    { maxSide: 1800, quality: 0.82 },
+    { maxSide: 1600, quality: 0.76 },
+    { maxSide: 1400, quality: 0.7 },
+  ];
+
+  try {
+    for (let index = 0; index < profiles.length; index += 1) {
+      const profile = profiles[index];
+      const blob = await renderReceiptImageBlob(source, profile.maxSide, profile.quality);
+      if (blob.size <= 5 * 1024 * 1024 || index === profiles.length - 1) {
+        const baseName = String(file.name || "comprovante").replace(/\.[^.]+$/, "") || "comprovante";
+        return new File([blob], `${baseName}.jpg`, {
+          type: "image/jpeg",
+          lastModified: Date.now(),
+        });
+      }
+    }
+    return file;
+  } finally {
+    source.close();
+  }
+}
+
+async function loadReceiptImageSource(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file, {
+        resizeWidth: 1800,
+        resizeHeight: 1800,
+        resizeQuality: "high",
+      });
+      return {
+        width: bitmap.width,
+        height: bitmap.height,
+        draw(targetContext, width, height) {
+          targetContext.drawImage(bitmap, 0, 0, width, height);
+        },
+        close() {
+          bitmap.close();
+        },
+      };
+    } catch {
+      try {
+        const bitmap = await createImageBitmap(file);
+        return {
+          width: bitmap.width,
+          height: bitmap.height,
+          draw(targetContext, width, height) {
+            targetContext.drawImage(bitmap, 0, 0, width, height);
+          },
+          close() {
+            bitmap.close();
+          },
+        };
+      } catch {
+        // fallback abaixo
+      }
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  const image = new Image();
+  image.decoding = "async";
+  image.src = objectUrl;
+
+  try {
+    if (image.decode) {
+      await image.decode();
+    } else {
+      await new Promise((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("image_decode_failed"));
+      });
+    }
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  return {
+    width: image.naturalWidth || image.width,
+    height: image.naturalHeight || image.height,
+    draw(targetContext, width, height) {
+      targetContext.drawImage(image, 0, 0, width, height);
+    },
+    close() {},
+  };
+}
+
+async function renderReceiptImageBlob(source, maxSide, quality) {
+  const longestSide = Math.max(source.width, source.height);
+  const scale = longestSide > maxSide ? maxSide / longestSide : 1;
+  const width = Math.max(1, Math.round(source.width * scale));
+  const height = Math.max(1, Math.round(source.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("receipt_canvas_failed");
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  source.draw(context, width, height);
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (result) resolve(result);
+      else reject(new Error("receipt_encode_failed"));
+    }, "image/jpeg", quality);
+  });
+
+  return blob;
+}
+
+async function applyReceiptSelection(file) {
+  const mimeType = isReceiptMimeAllowed(file);
+  if (!mimeType) {
+    const message = "Use uma imagem JPG, JPEG, PNG, WEBP ou um PDF.";
+    showToast(message, "neutral");
+    if (elements.receiptStatus) elements.receiptStatus.textContent = message;
     return false;
   }
 
-  if (state.receiptDraft.previewUrl) {
-    URL.revokeObjectURL(state.receiptDraft.previewUrl);
+  const selectionToken = (state.receiptDraft.selectionToken || 0) + 1;
+  state.receiptDraft.selectionToken = selectionToken;
+
+  if (mimeType === "application/pdf") {
+    const validation = validateReceiptFile(file);
+    if (validation) {
+      showToast(validation, "neutral");
+      if (elements.receiptStatus) elements.receiptStatus.textContent = validation;
+      return false;
+    }
+
+    if (state.receiptDraft.previewUrl) {
+      URL.revokeObjectURL(state.receiptDraft.previewUrl);
+    }
+
+    state.receiptDraft.file = file;
+    state.receiptDraft.previewUrl = URL.createObjectURL(file);
+    state.receiptDraft.removeExisting = false;
+    state.receiptDraft.mode = "pdf";
+    syncReceiptPanel(true);
+    return true;
   }
 
-  state.receiptDraft.file = file;
-  state.receiptDraft.previewUrl = URL.createObjectURL(file);
-  state.receiptDraft.removeExisting = false;
-  state.receiptDraft.mode = isReceiptMimeAllowed(file) === "application/pdf" ? "pdf" : "image";
+  state.receiptDraft.processing = true;
   syncReceiptPanel(true);
-  return true;
+
+  try {
+    const optimized = await compressReceiptImage(file);
+    if (state.receiptDraft.selectionToken !== selectionToken) return false;
+    const validation = validateReceiptFile(optimized, { allowLargeImage: false });
+    if (validation) {
+      showToast(validation, "neutral");
+      if (elements.receiptStatus) elements.receiptStatus.textContent = validation;
+      return false;
+    }
+
+    if (state.receiptDraft.previewUrl) {
+      URL.revokeObjectURL(state.receiptDraft.previewUrl);
+    }
+
+    state.receiptDraft.file = optimized;
+    state.receiptDraft.previewUrl = URL.createObjectURL(optimized);
+    state.receiptDraft.removeExisting = false;
+    state.receiptDraft.mode = "image";
+    syncReceiptPanel(true);
+    return true;
+  } catch (error) {
+    if (state.receiptDraft.selectionToken !== selectionToken) return false;
+    const message = "Não conseguimos processar a imagem. Tente outra foto.";
+    showToast(message, "neutral");
+    if (elements.receiptStatus) elements.receiptStatus.textContent = message;
+    return false;
+  } finally {
+    if (state.receiptDraft.selectionToken === selectionToken) {
+      state.receiptDraft.processing = false;
+      syncReceiptPanel(true);
+    }
+  }
 }
 
 function removeReceiptSelection() {
@@ -1421,6 +602,8 @@ function removeReceiptSelection() {
 
   state.receiptDraft.file = null;
   state.receiptDraft.previewUrl = "";
+  state.receiptDraft.processing = false;
+  state.receiptDraft.selectionToken += 1;
 
   if (state.receiptDraft.existing) {
     state.receiptDraft.removeExisting = true;
@@ -1439,8 +622,9 @@ function openCurrentReceipt() {
         url: state.receiptDraft.previewUrl,
       }
     : state.receiptDraft.existing;
-  if (!receipt?.url) return;
-  window.open(receipt.url, "_blank", "noopener,noreferrer");
+  const url = resolveReceiptUrl(receipt?.url || "");
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function openCategorySheet() {
@@ -1657,6 +841,10 @@ function showCategoryFeedback(message) {
 
 async function saveMovement(event) {
   event.preventDefault();
+  if (state.receiptDraft.processing) {
+    showToast("Aguarde a imagem terminar de processar.", "neutral");
+    return;
+  }
   const isEditing = Boolean(elements.movementId.value);
   const categoryName = elements.category.value || state.selectedCategory;
   const categoryId = getCategoryIdByName(state.formType, categoryName);
@@ -1905,7 +1093,7 @@ function renderMovementList(movements, options = {}) {
       const categoryName = movement.category || getCategoryNameById(movement.categoryId);
       const meta = getCategoryMeta(categoryName);
       const receiptAction = movement.receipt
-        ? `<a class="receipt-chip" href="${escapeHtml(movement.receipt.url)}" target="_blank" rel="noopener noreferrer">${movement.receipt.kind === "pdf" ? "PDF" : "Comprovante"}</a>`
+        ? `<a class="receipt-chip" href="${escapeHtml(resolveReceiptUrl(movement.receipt.url))}" target="_blank" rel="noopener noreferrer">${movement.receipt.kind === "pdf" ? "PDF" : "Comprovante"}</a>`
         : "";
       const actions = options.withActions
         ? `<details class="row-actions">
