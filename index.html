@@ -133,6 +133,18 @@
             </svg>
             <span>Insights</span>
           </button>
+          <button class="nav-tab" type="button" data-tab="goals">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2v3" />
+              <path d="M12 19v3" />
+              <path d="M4.9 4.9 7 7" />
+              <path d="M17 17l2.1 2.1" />
+              <path d="M2 12h3" />
+              <path d="M19 12h3" />
+              <circle cx="12" cy="12" r="5" />
+            </svg>
+            <span>Metas</span>
+          </button>
           <button class="nav-tab" type="button" data-tab="cycles">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 12a9 9 0 1 0 3-6.7" />
@@ -152,6 +164,7 @@
             <p>Saldo atual <span id="summary-period">ciclo ativo</span></p>
             <strong id="current-balance">R$ 0,00</strong>
             <span id="balance-note">Um retrato simples do ciclo.</span>
+            <small class="balance-reserve-note" id="goal-reserve-note" hidden></small>
             <div class="pulse-line" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
           </article>
 
@@ -238,6 +251,28 @@
             <p id="insight-subtitle">As frases mudam automaticamente com suas movimentações.</p>
           </article>
           <div class="insight-stack large" id="insights-list"></div>
+        </section>
+
+        <section class="tab-panel" id="tab-goals" data-title="Cofrinhos do ciclo.">
+          <article class="goal-hero">
+            <div>
+              <span class="mini-label">Cofrinhos do ciclo</span>
+              <strong id="goals-hero-available">R$ 0,00 disponíveis</strong>
+              <p id="goals-hero-copy">Separe parte do saldo e acompanhe o progresso de cada meta.</p>
+              <div class="goal-hero-stats">
+                <span><strong id="goals-total-saved">R$ 0,00</strong><small>guardados</small></span>
+                <span><strong id="goals-count-inline">0</strong><small>metas</small></span>
+              </div>
+            </div>
+            <button class="primary-action compact" id="open-goal-sheet" type="button">Nova meta</button>
+          </article>
+          <p class="form-note goal-feedback" id="goal-feedback" role="alert"></p>
+
+          <div class="section-heading">
+            <h2>Metas</h2>
+            <span class="section-subtitle" id="goals-count">0 metas</span>
+          </div>
+          <div class="goal-list" id="goal-list"></div>
         </section>
 
         <section class="tab-panel" id="tab-cycles" data-title="Ciclos fechados, sem ruído.">
@@ -447,6 +482,70 @@
       </article>
       <div class="movement-list cycle-detail-list" id="cycle-detail-list"></div>
     </div>
+  </section>
+
+  <section class="sheet" id="goal-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-goal-sheet></div>
+    <form class="movement-form goal-form" id="goal-form">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Metas</p>
+          <h2 id="goal-sheet-title">Nova meta</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-goal-sheet aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <input type="hidden" id="goal-id" />
+      <label class="field">
+        <span>Nome da meta</span>
+        <input id="goal-name" type="text" maxlength="32" placeholder="Viagem, reserva, curso..." required />
+      </label>
+
+      <label class="field value-field">
+        <span>Valor alvo</span>
+        <input id="goal-target" type="text" inputmode="decimal" placeholder="0,00" required />
+      </label>
+
+      <button class="primary-action" id="save-goal" type="submit">Salvar meta</button>
+    </form>
+  </section>
+
+  <section class="sheet" id="goal-amount-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-goal-amount-sheet></div>
+    <form class="movement-form goal-amount-form" id="goal-amount-form">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Metas</p>
+          <h2 id="goal-amount-title">Guardar valor</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-goal-amount-sheet aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <input type="hidden" id="goal-action-id" />
+      <input type="hidden" id="goal-action-mode" />
+
+      <p class="migration-copy" id="goal-amount-copy">Quanto você quer guardar nessa meta?</p>
+      <label class="field value-field">
+        <span>Valor</span>
+        <input id="goal-amount" type="text" inputmode="decimal" placeholder="0,00" required />
+      </label>
+      <p class="form-note" id="goal-amount-note">Use um valor dentro do saldo disponível.</p>
+
+      <button class="primary-action" id="confirm-goal-amount" type="submit">Guardar valor</button>
+      <button class="secondary-action" type="button" data-close-goal-amount-sheet>Cancelar</button>
+    </form>
   </section>
 
   <script src="./app.js"></script>

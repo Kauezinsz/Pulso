@@ -32,3 +32,10 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+
+# Temporary Edge debug profiles
+.edge-debug-profile*/
+.edge-debug-profile/
+
+# Database directories/files
+data/

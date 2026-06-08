@@ -40,6 +40,7 @@ const state = {
   currentCycle: null,
   cycles: [],
   cycleDetail: null,
+  goals: [],
   movements: [],
   activeTab: "summary",
   activeFilter: "all",
@@ -55,6 +56,7 @@ const state = {
   analysisType: "expense",
   activeAnalysisCategory: "",
   pendingDeleteCategory: "",
+  pendingDeleteGoal: "",
   pendingCloseCycle: false,
   authMode: "login",
   migrationVisible: false,
@@ -84,6 +86,7 @@ const elements = {
   openCloseCycle: $("#open-close-cycle"),
   balance: $("#current-balance"),
   balanceNote: $("#balance-note"),
+  goalReserveNote: $("#goal-reserve-note"),
   income: $("#total-income"),
   expense: $("#total-expense"),
   behaviorTitle: $("#behavior-title"),
@@ -96,6 +99,14 @@ const elements = {
   insightsList: $("#insights-list"),
   insightHeadline: $("#insight-headline"),
   insightSubtitle: $("#insight-subtitle"),
+  goalsHeroAvailable: $("#goals-hero-available"),
+  goalsHeroCopy: $("#goals-hero-copy"),
+  goalsSavedTotal: $("#goals-total-saved"),
+  goalsCountInline: $("#goals-count-inline"),
+  goalsCount: $("#goals-count"),
+  goalsFeedback: $("#goal-feedback"),
+  goalList: $("#goal-list"),
+  openGoalSheet: $("#open-goal-sheet"),
   topCategory: $("#top-category"),
   topCategoryCopy: $("#top-category-copy"),
   analysisPeriod: $("#analysis-period"),
@@ -149,6 +160,22 @@ const elements = {
   cycleDetailIncome: $("#cycle-detail-income"),
   cycleDetailExpense: $("#cycle-detail-expense"),
   cycleDetailList: $("#cycle-detail-list"),
+  goalSheet: $("#goal-sheet"),
+  goalForm: $("#goal-form"),
+  goalSheetTitle: $("#goal-sheet-title"),
+  goalId: $("#goal-id"),
+  goalName: $("#goal-name"),
+  goalTarget: $("#goal-target"),
+  saveGoal: $("#save-goal"),
+  goalAmountSheet: $("#goal-amount-sheet"),
+  goalAmountForm: $("#goal-amount-form"),
+  goalAmountSheetTitle: $("#goal-amount-title"),
+  goalAmountSheetCopy: $("#goal-amount-copy"),
+  goalActionId: $("#goal-action-id"),
+  goalActionMode: $("#goal-action-mode"),
+  goalAmount: $("#goal-amount"),
+  goalAmountNote: $("#goal-amount-note"),
+  confirmGoalAmount: $("#confirm-goal-amount"),
 };
 
 init();
@@ -308,17 +335,22 @@ async function logout() {
   state.currentCycle = null;
   state.cycles = [];
   state.cycleDetail = null;
+  state.goals = [];
   state.movements = [];
   state.categories = cloneDefaultCategories();
   state.categoryRecords = { income: [], expense: [] };
   state.selectedCategory = "";
   state.authStatus = "guest";
   state.pendingCloseCycle = false;
+  state.pendingDeleteGoal = "";
+  clearTimeout(requestGoalDelete.timeout);
   setAuthMode("guest");
   updateAuthShell();
   setAuthTab("login");
   closeCycleSheet();
   closeCycleDetailSheet();
+  closeGoalSheet();
+  closeGoalAmountSheet();
   render();
 }
 
@@ -344,6 +376,13 @@ function authErrorMessage(error) {
   if (error.code === "email_in_use") return "Esse e-mail ja esta em uso.";
   if (error.code === "invalid_credentials") return "E-mail ou senha invalidos.";
   if (error.code === "unauthorized") return "Sua sessao expirou. Entre novamente.";
+  if (error.code === "goal_exists") return "Já existe uma meta com esse nome neste ciclo.";
+  if (error.code === "invalid_goal") return "Confira o nome e o valor alvo da meta.";
+  if (error.code === "goal_target_too_low") return "O valor alvo não pode ficar abaixo do que já foi guardado.";
+  if (error.code === "insufficient_goal_balance") return "Não há saldo disponível suficiente para guardar nessa meta.";
+  if (error.code === "goal_insufficient_saved") return "Não há valor suficiente guardado nessa meta.";
+  if (error.code === "invalid_goal_amount") return "Informe um valor válido.";
+  if (error.code === "goal_not_found") return "Não encontramos essa meta.";
   return error.message || "Nao foi possivel continuar.";
 }
 
@@ -381,6 +420,8 @@ async function loadUserData() {
   state.currentCycle = bootstrap.currentCycle || null;
   state.cycles = Array.isArray(bootstrap.cycles) ? bootstrap.cycles : [];
   state.cycleDetail = null;
+  state.goals = normalizeGoalsPayload(bootstrap.goals);
+  state.pendingDeleteGoal = "";
   applyCategoryPayload(bootstrap.categories);
   state.movements = normalizeMovementsPayload(bootstrap.movements);
   if (!getCategoriesForType(state.formType).includes(state.selectedCategory)) {
@@ -444,6 +485,8 @@ function closeMigrationSheet() {
 }
 
 function openCloseCycleSheet() {
+  closeGoalSheet();
+  closeGoalAmountSheet();
   const currentCycle = state.currentCycle;
   if (!currentCycle) return;
 
@@ -486,10 +529,12 @@ async function confirmCloseCycle() {
 function renderCycles() {
   const closedCycles = state.cycles.filter((cycle) => cycle.status === "closed");
   const activeCycle = state.currentCycle;
+  const totals = getTotals();
+  const availableBalance = getAvailableBalance(totals);
 
   elements.cycleTabCurrentLabel.textContent = activeCycle ? formatCycleTitle(activeCycle) : "Ciclo atual";
   elements.cycleTabCurrentCopy.textContent = activeCycle
-    ? `Aberto em ${formatDate(activeCycle.startedAt)}. ${currency.format(getTotals().balance)} de saldo no ciclo ativo.`
+    ? `Aberto em ${formatDate(activeCycle.startedAt)}. ${currency.format(availableBalance)} de saldo disponível no ciclo ativo.`
     : "Feche o ciclo atual quando quiser virar o período.";
 
   elements.closedCyclesCount.textContent = `${closedCycles.length} ciclo${closedCycles.length === 1 ? "" : "s"}`;
@@ -522,6 +567,8 @@ function renderCycleCard(cycle) {
 
 async function openCycleDetail(cycleId) {
   try {
+    closeGoalSheet();
+    closeGoalAmountSheet();
     const payload = await apiRequest(`/api/cycles/${encodeURIComponent(cycleId)}`);
     state.cycleDetail = {
       cycle: payload.cycle,
@@ -557,6 +604,267 @@ function renderCycleDetail() {
   elements.cycleDetailList.innerHTML = renderMovementList(movements, {
     empty: "Este ciclo não tem lançamentos.",
   });
+}
+
+function renderGoals(totals) {
+  const reserved = getGoalSavedTotal();
+  const available = getAvailableBalance(totals, reserved);
+  const goalCount = state.goals.length;
+
+  if (elements.goalsHeroAvailable) {
+    elements.goalsHeroAvailable.textContent = `${currency.format(available)} disponíveis`;
+  }
+  if (elements.goalsHeroCopy) {
+    elements.goalsHeroCopy.textContent = goalCount
+      ? `Você já guardou ${currency.format(reserved)} em ${goalCount} meta${goalCount === 1 ? "" : "s"} neste ciclo.`
+      : "Separe parte do saldo do ciclo e acompanhe o progresso de cada meta.";
+  }
+  if (elements.goalsSavedTotal) {
+    elements.goalsSavedTotal.textContent = currency.format(reserved);
+  }
+  if (elements.goalsCountInline) {
+    elements.goalsCountInline.textContent = String(goalCount);
+  }
+  if (elements.goalsCount) {
+    elements.goalsCount.textContent = `${goalCount} meta${goalCount === 1 ? "" : "s"}`;
+  }
+
+  if (!state.pendingDeleteGoal) {
+    elements.goalsFeedback.textContent = "";
+    elements.goalsFeedback.classList.remove("show");
+  }
+
+  elements.goalList.innerHTML = state.goals.length
+    ? state.goals.map((goal) => renderGoalCard(goal, available)).join("")
+    : renderEmptyState("Nenhuma meta ainda", "Crie um cofrinho para separar parte do saldo do ciclo.");
+}
+
+function renderGoalCard(goal, availableBalance) {
+  const progress = goal.targetAmount > 0 ? Math.round((goal.savedAmount / goal.targetAmount) * 100) : 0;
+  const fill = Math.min(progress, 100);
+  const complete = goal.savedAmount >= goal.targetAmount;
+  const pending = state.pendingDeleteGoal === goal.id;
+
+  return `<article class="goal-card ${complete ? "complete" : ""} ${pending ? "pending-delete" : ""}">
+    <div class="goal-head">
+      <div class="goal-copy">
+        <span class="mini-label">Meta</span>
+        <strong>${escapeHtml(capitalize(goal.name))}</strong>
+        <p>Guardado ${currency.format(goal.savedAmount)} · Alvo ${currency.format(goal.targetAmount)}</p>
+      </div>
+      <div class="goal-progress-copy">
+        <strong>${progress >= 100 ? "100%+" : `${progress}%`}</strong>
+        <span>${complete ? "Concluída" : "Em andamento"}</span>
+      </div>
+    </div>
+    <div class="goal-track" aria-hidden="true"><div class="goal-fill" style="width:${fill}%"></div></div>
+    <div class="goal-actions">
+      <button class="secondary-action compact goal-action" type="button" data-goal-save="${goal.id}" ${availableBalance <= 0 ? "disabled" : ""}>Guardar</button>
+      <button class="secondary-action compact goal-action" type="button" data-goal-remove="${goal.id}" ${goal.savedAmount <= 0 ? "disabled" : ""}>Remover</button>
+    </div>
+    <div class="goal-meta-actions">
+      <button class="text-button" type="button" data-goal-edit="${goal.id}">Editar</button>
+      <button class="text-button ${pending ? "pending" : ""}" type="button" data-goal-delete="${goal.id}">${pending ? "Confirmar" : "Excluir"}</button>
+    </div>
+  </article>`;
+}
+
+function openGoalSheet(goal = null) {
+  closeSheet();
+  closeCategorySheet();
+  closeCycleSheet();
+  closeCycleDetailSheet();
+  state.pendingDeleteGoal = "";
+  clearTimeout(requestGoalDelete.timeout);
+  if (elements.goalsFeedback) {
+    elements.goalsFeedback.textContent = "";
+    elements.goalsFeedback.classList.remove("show");
+  }
+  elements.goalForm.reset();
+  elements.goalId.value = "";
+  elements.goalSheetTitle.textContent = "Nova meta";
+  elements.saveGoal.textContent = "Salvar meta";
+
+  if (goal) {
+    elements.goalId.value = goal.id;
+    elements.goalSheetTitle.textContent = "Editar meta";
+    elements.saveGoal.textContent = "Salvar alterações";
+    elements.goalName.value = goal.name;
+    elements.goalTarget.value = formatMoneyInput(goal.targetAmount);
+  }
+
+  elements.goalSheet.classList.add("open");
+  elements.goalSheet.setAttribute("aria-hidden", "false");
+  setTimeout(() => elements.goalName.focus(), 120);
+}
+
+function closeGoalSheet() {
+  elements.goalSheet.classList.remove("open");
+  elements.goalSheet.setAttribute("aria-hidden", "true");
+}
+
+function openGoalAmountSheet(goal, mode) {
+  if (!goal || !mode) return;
+  closeSheet();
+  closeCategorySheet();
+  closeCycleSheet();
+  closeCycleDetailSheet();
+  state.pendingDeleteGoal = "";
+  clearTimeout(requestGoalDelete.timeout);
+  if (elements.goalsFeedback) {
+    elements.goalsFeedback.textContent = "";
+    elements.goalsFeedback.classList.remove("show");
+  }
+  elements.goalAmountForm.reset();
+  elements.goalActionId.value = goal.id;
+  elements.goalActionMode.value = mode;
+  elements.goalAmountSheetTitle.textContent = mode === "remove" ? "Remover valor" : "Guardar valor";
+  elements.goalAmountSheetCopy.textContent = mode === "remove"
+    ? `Quanto você quer devolver de ${capitalize(goal.name)}?`
+    : `Quanto você quer guardar em ${capitalize(goal.name)}?`;
+  elements.goalAmountNote.textContent = mode === "remove"
+    ? `Guardado agora: ${currency.format(goal.savedAmount)}.`
+    : `Saldo disponível: ${currency.format(getAvailableBalance(getTotals()))}.`;
+  elements.confirmGoalAmount.textContent = mode === "remove" ? "Remover valor" : "Guardar valor";
+  elements.goalAmount.value = "";
+  elements.goalAmountSheet.classList.add("open");
+  elements.goalAmountSheet.setAttribute("aria-hidden", "false");
+  setTimeout(() => elements.goalAmount.focus(), 120);
+}
+
+function closeGoalAmountSheet() {
+  elements.goalAmountSheet.classList.remove("open");
+  elements.goalAmountSheet.setAttribute("aria-hidden", "true");
+}
+
+async function saveGoal(event) {
+  event.preventDefault();
+  const goalId = elements.goalId.value.trim();
+  const payload = {
+    name: normalizeGoalName(elements.goalName.value),
+    targetAmount: parseMoney(elements.goalTarget.value),
+  };
+
+  if (!payload.name || payload.targetAmount <= 0) {
+    showGoalFeedback("Informe um nome e um valor alvo válidos.");
+    return;
+  }
+
+  try {
+    if (goalId) {
+      await apiRequest(`/api/goals/${encodeURIComponent(goalId)}`, {
+        method: "PUT",
+        body: payload,
+      });
+      showToast("Meta atualizada", "success");
+    } else {
+      await apiRequest("/api/goals", {
+        method: "POST",
+        body: payload,
+      });
+      showToast("Meta criada", "success");
+    }
+
+    await loadUserData();
+    closeGoalSheet();
+    render({ pulse: true });
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showGoalFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+async function submitGoalAmount(event) {
+  event.preventDefault();
+  const goalId = elements.goalActionId.value.trim();
+  const mode = elements.goalActionMode.value;
+  const goal = state.goals.find((item) => item.id === goalId);
+  if (!goal || !mode) return;
+
+  const amount = parseMoney(elements.goalAmount.value);
+  const available = getAvailableBalance(getTotals());
+
+  if (amount <= 0) {
+    showGoalFeedback("Informe um valor válido.");
+    return;
+  }
+
+  if (mode === "save" && amount > available) {
+    showGoalFeedback("Não há saldo disponível suficiente para guardar nessa meta.");
+    return;
+  }
+
+  if (mode === "remove" && amount > goal.savedAmount) {
+    showGoalFeedback("Não há valor suficiente guardado nessa meta.");
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/goals/${encodeURIComponent(goalId)}/${mode}`, {
+      method: "POST",
+      body: { amount },
+    });
+    await loadUserData();
+    closeGoalAmountSheet();
+    render({ pulse: true });
+    showToast(mode === "save" ? "Valor guardado na meta" : "Valor devolvido ao saldo", "success");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showGoalFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+function requestGoalDelete(goal) {
+  if (!goal) return;
+
+  if (state.pendingDeleteGoal === goal.id) {
+    void deleteGoal(goal.id);
+    return;
+  }
+
+  state.pendingDeleteGoal = goal.id;
+  showGoalFeedback(goal.savedAmount > 0
+    ? "Toque novamente em Excluir para confirmar. O valor guardado volta ao saldo disponível."
+    : "Toque novamente em Excluir para confirmar.");
+  showToast("Confirme a exclusão", "neutral");
+  renderGoals(getTotals());
+
+  clearTimeout(requestGoalDelete.timeout);
+  requestGoalDelete.timeout = setTimeout(() => {
+    if (state.pendingDeleteGoal === goal.id) {
+      state.pendingDeleteGoal = "";
+      if (elements.goalsFeedback.textContent) {
+        elements.goalsFeedback.textContent = "";
+        elements.goalsFeedback.classList.remove("show");
+      }
+      renderGoals(getTotals());
+    }
+  }, 4200);
+}
+
+async function deleteGoal(goalId) {
+  try {
+    await apiRequest(`/api/goals/${encodeURIComponent(goalId)}`, { method: "DELETE" });
+    state.pendingDeleteGoal = "";
+    await loadUserData();
+    render({ pulse: true });
+    showToast("Meta removida", "neutral");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    state.pendingDeleteGoal = "";
+    renderGoals(getTotals());
+    showGoalFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+function showGoalFeedback(message) {
+  if (!elements.goalsFeedback) return;
+  elements.goalsFeedback.textContent = message;
+  elements.goalsFeedback.classList.remove("show");
+  requestAnimationFrame(() => elements.goalsFeedback.classList.add("show"));
 }
 
 async function importLocalData() {
@@ -629,6 +937,21 @@ function normalizeMovementsPayload(items) {
     : [];
 }
 
+function normalizeGoalsPayload(items) {
+  return Array.isArray(items)
+    ? items.map((item) => ({
+        id: item.id,
+        cycleId: item.cycleId,
+        name: normalizeGoalName(item.name),
+        slug: item.slug,
+        targetAmount: Number(item.targetAmount || 0),
+        savedAmount: Number(item.savedAmount || 0),
+        remainingAmount: Number(item.remainingAmount || 0),
+        progress: Number(item.progress || 0),
+      }))
+    : [];
+}
+
 function bindEvents() {
   elements.authTabs.forEach((button) => {
     button.addEventListener("click", () => setAuthTab(button.dataset.authTab));
@@ -684,8 +1007,56 @@ function bindEvents() {
     void confirmCloseCycle();
   });
 
+  elements.openGoalSheet.addEventListener("click", () => openGoalSheet());
+  elements.goalList.addEventListener("click", (event) => {
+    const saveButton = event.target.closest("[data-goal-save]");
+    if (saveButton) {
+      const goal = state.goals.find((item) => item.id === saveButton.dataset.goalSave);
+      if (goal) openGoalAmountSheet(goal, "save");
+      return;
+    }
+
+    const removeButton = event.target.closest("[data-goal-remove]");
+    if (removeButton) {
+      const goal = state.goals.find((item) => item.id === removeButton.dataset.goalRemove);
+      if (goal) openGoalAmountSheet(goal, "remove");
+      return;
+    }
+
+    const editButton = event.target.closest("[data-goal-edit]");
+    if (editButton) {
+      const goal = state.goals.find((item) => item.id === editButton.dataset.goalEdit);
+      if (goal) openGoalSheet(goal);
+      return;
+    }
+
+    const deleteButton = event.target.closest("[data-goal-delete]");
+    if (deleteButton) {
+      const goal = state.goals.find((item) => item.id === deleteButton.dataset.goalDelete);
+      if (goal) {
+        void requestGoalDelete(goal);
+      }
+    }
+  });
+
+  elements.goalForm.addEventListener("submit", (event) => {
+    void saveGoal(event);
+  });
+
+  elements.goalAmountForm.addEventListener("submit", (event) => {
+    void submitGoalAmount(event);
+  });
+
   $$("[data-close-cycle-sheet]").forEach((element) => {
     element.addEventListener("click", closeCycleSheet);
+  });
+
+  $$("[data-close-goal-sheet]").forEach((element) => {
+    element.addEventListener("click", closeGoalSheet);
+  });
+
+  $$("[data-close-goal-amount-sheet]").forEach((element) => {
+    element.addEventListener("click", closeGoalAmountSheet);
   });
 
   $$("[data-close-cycle-detail]").forEach((element) => {
@@ -760,6 +1131,8 @@ function setActiveTab(tab) {
 }
 
 function openSheet(movement = null) {
+  closeGoalSheet();
+  closeGoalAmountSheet();
   elements.form.reset();
   elements.date.value = new Date().toISOString().slice(0, 10);
   elements.movementId.value = "";
@@ -803,6 +1176,8 @@ function selectCategory(category) {
 }
 
 function openCategorySheet() {
+  closeGoalSheet();
+  closeGoalAmountSheet();
   elements.categorySheet.classList.add("open");
   elements.categorySheet.setAttribute("aria-hidden", "false");
   closeCategoryEditor();
@@ -1084,6 +1459,7 @@ function render(options = {}) {
   renderHistory();
   renderAnalysis(totals);
   renderInsights(totals);
+  renderGoals(totals);
   renderCycles();
 }
 
@@ -1094,6 +1470,8 @@ function renderSummary(totals, options = {}) {
   const isEmpty = state.movements.length === 0;
   const currentCycle = state.currentCycle;
   const currentCycleLabel = currentCycle?.label || "Ciclo atual";
+  const goalReserved = getGoalSavedTotal();
+  const availableBalance = totals.balance - goalReserved;
 
   elements.summaryPeriod.textContent = currentCycle?.status === "active" ? "Ciclo ativo" : "Ciclo";
   elements.currentCycleLabel.textContent = currentCycleLabel;
@@ -1102,14 +1480,18 @@ function renderSummary(totals, options = {}) {
       ? `Aberto em ${formatDate(currentCycle.startedAt)}. Nenhum lançamento é perdido ao fechar o ciclo.`
       : `Fechado em ${formatDate(currentCycle.closedAt || currentCycle.updatedAt)}.`
     : "Os lançamentos deste ciclo aparecem aqui.";
-  elements.balance.textContent = currency.format(totals.balance);
+  elements.balance.textContent = currency.format(availableBalance);
   elements.income.textContent = currency.format(totals.income);
   elements.expense.textContent = currency.format(totals.expense);
   elements.balanceNote.textContent = isEmpty
     ? "Comece com um lançamento e o Pulso desenha o ciclo atual."
-    : totals.balance >= 0
+    : availableBalance >= 0
       ? "O ciclo ainda respira bem. Dá para seguir com calma."
       : "O ciclo ficou no vermelho. Ainda dá para ajustar cedo.";
+  if (elements.goalReserveNote) {
+    elements.goalReserveNote.hidden = goalReserved <= 0;
+    elements.goalReserveNote.textContent = goalReserved > 0 ? `${currency.format(goalReserved)} guardados em metas neste ciclo.` : "";
+  }
   elements.behaviorRing.style.background = `conic-gradient(var(--cyan) ${degrees}deg, rgba(255,255,255,.08) ${degrees}deg)`;
   elements.behaviorPercent.textContent = `${percent}%`;
 
@@ -1436,6 +1818,14 @@ function getTotals() {
   );
 }
 
+function getGoalSavedTotal() {
+  return state.goals.reduce((sum, goal) => sum + Number(goal.savedAmount || 0), 0);
+}
+
+function getAvailableBalance(totals = getTotals(), reserved = getGoalSavedTotal()) {
+  return Number(totals.balance || 0) - Number(reserved || 0);
+}
+
 function groupExpensesByCategory() {
   return groupMovementsByCategory("expense");
 }
@@ -1563,6 +1953,10 @@ function normalizeCategoryName(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
 }
 
+function normalizeGoalName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
 function sameCategory(left, right) {
   return String(left || "").toLocaleLowerCase("pt-BR") === String(right || "").toLocaleLowerCase("pt-BR");
 }
@@ -1589,6 +1983,7 @@ function periodLabel(tab) {
     history: "Lançamentos do ciclo",
     analysis: "Ciclo ativo",
     insights: "Leituras do ciclo",
+    goals: "Cofrinhos do ciclo",
     cycles: "Histórico de ciclos",
   };
   return labels[tab] || "Ciclo ativo";

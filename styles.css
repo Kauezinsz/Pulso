@@ -413,6 +413,15 @@ h2 {
   font-size: 0.94rem;
 }
 
+.balance-reserve-note {
+  position: relative;
+  display: block;
+  margin-top: 8px;
+  color: var(--soft);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
 .pulse-line {
   position: absolute;
   left: 24px;
@@ -648,6 +657,191 @@ h2 {
   color: var(--soft);
   font-size: 0.92rem;
   line-height: 1.48;
+}
+
+.goal-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(46, 231, 255, 0.12);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(23, 58, 90, 0.82), rgba(6, 18, 32, 0.94) 62%, rgba(2, 10, 18, 0.98)),
+    radial-gradient(circle at 86% 18%, rgba(46, 231, 255, 0.08), transparent 11rem);
+  box-shadow: inset 0 0 0 1px rgba(198, 216, 232, 0.06), 0 20px 44px rgba(0, 0, 0, 0.24);
+}
+
+.goal-hero strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.22rem;
+  line-height: 1.08;
+}
+
+.goal-hero p {
+  max-width: 260px;
+  margin-top: 6px;
+  color: var(--soft);
+  font-size: 0.92rem;
+  line-height: 1.48;
+}
+
+.goal-hero-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.goal-hero-stats span {
+  display: grid;
+  gap: 2px;
+  min-width: 112px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.032);
+}
+
+.goal-hero-stats strong {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.1;
+}
+
+.goal-hero-stats small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.goal-feedback {
+  min-height: 18px;
+  margin: 8px 2px 0;
+  color: var(--soft);
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.goal-feedback.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.goal-amount-form .form-note {
+  color: var(--soft);
+}
+
+.goal-list {
+  display: grid;
+  gap: 10px;
+}
+
+.goal-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.018));
+}
+
+.goal-card.complete {
+  border-color: rgba(93, 255, 177, 0.2);
+}
+
+.goal-card.pending-delete {
+  border-color: rgba(255, 111, 145, 0.28);
+}
+
+.goal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.goal-copy strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.08rem;
+  line-height: 1.1;
+}
+
+.goal-copy p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.goal-progress-copy {
+  flex: 0 0 auto;
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  text-align: right;
+}
+
+.goal-progress-copy strong {
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.goal-progress-copy span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.goal-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.goal-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), #e7fcff);
+}
+
+.goal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.goal-actions .goal-action {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 0;
+}
+
+.goal-meta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.goal-meta-actions .text-button.pending {
+  color: var(--red);
+}
+
+.goal-card .text-button {
+  min-height: 30px;
+  padding: 0;
+}
+
+.goal-card .text-button:disabled,
+.goal-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .cycle-list {
@@ -1236,7 +1430,7 @@ h2 {
   bottom: calc(18px + env(safe-area-inset-bottom));
   z-index: 5;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 1px;
   padding: 3px;
   border: 1px solid rgba(165, 224, 255, 0.07);
@@ -1286,10 +1480,10 @@ h2 {
   z-index: 6;
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 1px solid rgba(46, 231, 255, 0.24);
-  border-radius: 13px;
+  border-radius: 14px;
   background: linear-gradient(145deg, rgba(8, 29, 47, 0.96), rgba(11, 47, 72, 0.94));
   color: var(--cyan);
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.035);
@@ -1297,8 +1491,8 @@ h2 {
 }
 
 .fab svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
 .fab:hover {
@@ -1754,6 +1948,8 @@ body.has-hover .analysis-hero:hover,
 body.has-hover .insight-lead:hover,
 body.has-hover .movement-item:hover,
 body.has-hover .insight-card:hover,
+body.has-hover .goal-card:hover,
+body.has-hover .goal-hero:hover,
 body.has-hover .cycle-card:hover,
 body.has-hover .cycle-hero:hover,
 body.has-hover .category-row:hover {
@@ -2003,6 +2199,11 @@ body.has-hover .category-row:hover {
   .tab-cycles > :nth-child(3) {
     grid-column: 2;
     grid-row: 2;
+  }
+
+  .goal-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
   }
 
   .cycle-list {
@@ -2307,6 +2508,11 @@ body.has-hover .category-row:hover {
     grid-row: 2;
   }
 
+  .goal-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
   .cycle-list {
     gap: 12px;
   }
@@ -2365,5 +2571,14 @@ body.has-hover .category-row:hover {
   .content-area {
     height: calc(100dvh - 172px - env(safe-area-inset-top));
     min-height: 0;
+  }
+
+  .goal-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .goal-hero .primary-action.compact {
+    width: fit-content;
   }
 }

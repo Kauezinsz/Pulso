@@ -91,7 +91,21 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cycle_id TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    target_amount REAL NOT NULL,
+    saved_amount REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id, cycle_id, slug)
+  );
+
   CREATE UNIQUE INDEX IF NOT EXISTS idx_cycles_one_active_per_user ON cycles(user_id) WHERE status = 'active';
+  CREATE INDEX IF NOT EXISTS idx_goals_cycle_lookup ON goals(user_id, cycle_id, created_at DESC);
 `);
 
 ensureMovementCycleColumn();
@@ -199,6 +213,75 @@ const statements = {
     GROUP BY cycles.id
     LIMIT 1
   `),
+  listGoalsByCycle: db.prepare(`
+    SELECT
+      goals.id,
+      goals.user_id AS userId,
+      goals.cycle_id AS cycleId,
+      goals.name,
+      goals.slug,
+      goals.target_amount AS targetAmount,
+      goals.saved_amount AS savedAmount,
+      goals.created_at AS createdAt,
+      goals.updated_at AS updatedAt
+    FROM goals
+    WHERE goals.user_id = ? AND goals.cycle_id = ?
+    ORDER BY goals.created_at DESC
+  `),
+  findGoalById: db.prepare(`
+    SELECT
+      goals.id,
+      goals.user_id AS userId,
+      goals.cycle_id AS cycleId,
+      goals.name,
+      goals.slug,
+      goals.target_amount AS targetAmount,
+      goals.saved_amount AS savedAmount,
+      goals.created_at AS createdAt,
+      goals.updated_at AS updatedAt
+    FROM goals
+    WHERE goals.id = ? AND goals.user_id = ? AND goals.cycle_id = ?
+    LIMIT 1
+  `),
+  findGoalBySlug: db.prepare(`
+    SELECT
+      goals.id,
+      goals.user_id AS userId,
+      goals.cycle_id AS cycleId,
+      goals.name,
+      goals.slug,
+      goals.target_amount AS targetAmount,
+      goals.saved_amount AS savedAmount,
+      goals.created_at AS createdAt,
+      goals.updated_at AS updatedAt
+    FROM goals
+    WHERE goals.user_id = ? AND goals.cycle_id = ? AND goals.slug = ?
+    LIMIT 1
+  `),
+  sumGoalsSavedByCycle: db.prepare(`
+    SELECT COALESCE(SUM(saved_amount), 0) AS total
+    FROM goals
+    WHERE user_id = ? AND cycle_id = ?
+  `),
+  insertGoal: db.prepare(`
+    INSERT INTO goals (
+      id, user_id, cycle_id, name, slug, target_amount, saved_amount, created_at, updated_at
+    )
+    VALUES (
+      @id, @userId, @cycleId, @name, @slug, @targetAmount, @savedAmount, @createdAt, @updatedAt
+    )
+  `),
+  updateGoal: db.prepare(`
+    UPDATE goals
+    SET name = ?, slug = ?, target_amount = ?, updated_at = ?
+    WHERE id = ? AND user_id = ? AND cycle_id = ?
+  `),
+  updateGoalSavedAmount: db.prepare(`
+    UPDATE goals
+    SET saved_amount = ?, updated_at = ?
+    WHERE id = ? AND user_id = ? AND cycle_id = ?
+  `),
+  deleteGoal: db.prepare(`DELETE FROM goals WHERE id = ? AND user_id = ? AND cycle_id = ?`),
   assignLegacyMovementsToCycle: db.prepare(`
     UPDATE movements
     SET cycle_id = ?
@@ -332,6 +415,12 @@ function normalizeName(name) {
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+function normalizeGoalName(name) {
+  return String(name || "")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function slugify(name) {
@@ -562,6 +651,25 @@ function serializeCycle(row) {
   };
 }
 
+function serializeGoal(row) {
+  if (!row) return null;
+  const targetAmount = Number(row.targetAmount || 0);
+  const savedAmount = Number(row.savedAmount || 0);
+  return {
+    id: row.id,
+    userId: row.userId,
+    cycleId: row.cycleId,
+    name: row.name,
+    slug: row.slug,
+    targetAmount,
+    savedAmount,
+    remainingAmount: Math.max(targetAmount - savedAmount, 0),
+    progress: targetAmount > 0 ? Math.max(Math.round((savedAmount / targetAmount) * 100), 0) : 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 function listMovementsByCycle(userId, cycleId) {
   return statements.listMovementsByCycle.all(userId, cycleId).map(serializeMovement);
 }
@@ -576,6 +684,10 @@ function listCyclesByUser(userId) {
 
 function listClosedCyclesByUser(userId) {
   return statements.listClosedCyclesByUser.all(userId).map(serializeCycle);
+}
+
+function listGoalsByCycle(userId, cycleId) {
+  return statements.listGoalsByCycle.all(userId, cycleId).map(serializeGoal);
 }
 
 function getCycleSummary(userId, cycleId) {
@@ -616,6 +728,10 @@ function ensureCurrentCycle(userId) {
   }
 
   return serializeCycle(cycle);
+}
+
+function getGoalSummary(userId, cycleId) {
+  return Number(statements.sumGoalsSavedByCycle.get(userId, cycleId)?.total || 0);
 }
 
 function formatCycleLabel(startedAt, closedAt) {
@@ -663,6 +779,145 @@ function closeCurrentCycle(userId) {
     currentCycle: serializeCycle(statements.findActiveCycleByUser.get(userId)),
     cycles: listCyclesByUser(userId),
   };
+}
+
+function ensureGoalCapacity(userId, cycleId, name, targetAmount) {
+  const normalizedName = normalizeGoalName(name);
+  const slug = slugify(normalizedName);
+  const amount = Number(targetAmount);
+
+  if (!normalizedName || !slug || !Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("invalid_goal");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const existing = statements.findGoalBySlug.get(userId, cycleId, slug);
+  if (existing) {
+    const error = new Error("goal_exists");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const timestamp = nowIso();
+  const id = uuid();
+  statements.insertGoal.run({
+    id,
+    userId,
+    cycleId,
+    name: normalizedName,
+    slug,
+    targetAmount: amount,
+    savedAmount: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  return statements.findGoalById.get(id, userId, cycleId);
+}
+
+function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount) {
+  const current = statements.findGoalById.get(goalId, userId, cycleId);
+  if (!current) {
+    const error = new Error("goal_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const normalizedName = normalizeGoalName(name);
+  const slug = slugify(normalizedName);
+  const amount = Number(targetAmount);
+
+  if (!normalizedName || !slug || !Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("invalid_goal");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const existing = statements.findGoalBySlug.get(userId, cycleId, slug);
+  if (existing && existing.id !== current.id) {
+    const error = new Error("goal_exists");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  if (amount < Number(current.savedAmount || 0)) {
+    const error = new Error("goal_target_too_low");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const timestamp = nowIso();
+  statements.updateGoal.run(normalizedName, slug, amount, timestamp, goalId, userId, cycleId);
+  return statements.findGoalById.get(goalId, userId, cycleId);
+}
+
+function saveGoalAmount(userId, cycleId, goalId, amountToSave) {
+  const goal = statements.findGoalById.get(goalId, userId, cycleId);
+  if (!goal) {
+    const error = new Error("goal_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const amount = Number(amountToSave);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("invalid_goal_amount");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const currentCycle = getCycleSummary(userId, cycleId);
+  const reservedTotal = getGoalSummary(userId, cycleId);
+  const availableBalance = Number(currentCycle?.balance || 0) - Number(reservedTotal || 0);
+  if (amount > availableBalance) {
+    const error = new Error("insufficient_goal_balance");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const nextSaved = Number(goal.savedAmount || 0) + amount;
+  statements.updateGoalSavedAmount.run(nextSaved, nowIso(), goalId, userId, cycleId);
+  return statements.findGoalById.get(goalId, userId, cycleId);
+}
+
+function removeGoalAmount(userId, cycleId, goalId, amountToRemove) {
+  const goal = statements.findGoalById.get(goalId, userId, cycleId);
+  if (!goal) {
+    const error = new Error("goal_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const amount = Number(amountToRemove);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("invalid_goal_amount");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const currentSaved = Number(goal.savedAmount || 0);
+  if (amount > currentSaved) {
+    const error = new Error("goal_insufficient_saved");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const nextSaved = currentSaved - amount;
+  statements.updateGoalSavedAmount.run(nextSaved, nowIso(), goalId, userId, cycleId);
+  return statements.findGoalById.get(goalId, userId, cycleId);
+}
+
+function deleteGoalById(userId, cycleId, goalId) {
+  const goal = statements.findGoalById.get(goalId, userId, cycleId);
+  if (!goal) {
+    const error = new Error("goal_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  statements.deleteGoal.run(goalId, userId, cycleId);
+  return goal;
 }
 
 function findCategoryForUserOrThrow(userId, categoryId) {
@@ -761,6 +1016,7 @@ function collectUserBootstrap(userId) {
     cycles: listCyclesByUser(userId),
     categories: listCategoriesByUser(userId),
     movements: listMovementsByCycle(userId, currentCycle.id),
+    goals: listGoalsByCycle(userId, currentCycle.id),
   };
 }
 
@@ -1059,6 +1315,85 @@ function handleMovements(request, response, context, pathname, method, body) {
   sendJson(response, 405, { error: "method_not_allowed" });
 }
 
+function handleGoals(request, response, context, pathname, method, body) {
+  const userId = context.user.id;
+  const currentCycle = ensureCurrentCycle(userId);
+
+  if (method === "GET" && pathname === "/api/goals") {
+    sendJson(response, 200, {
+      currentCycle,
+      goals: listGoalsByCycle(userId, currentCycle.id),
+    });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/goals") {
+    const goal = ensureGoalCapacity(userId, currentCycle.id, body.name, body.targetAmount);
+    sendJson(response, 201, {
+      ok: true,
+      goal: serializeGoal(goal),
+      goals: listGoalsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  const match = pathname.match(/^\/api\/goals\/([^/]+)(?:\/(save|remove))?$/);
+  if (!match) {
+    sendJson(response, 404, { error: "not_found" });
+    return;
+  }
+
+  const goalId = decodeURIComponent(match[1]);
+  const action = match[2] || "";
+
+  if (method === "PUT" || method === "PATCH") {
+    const goal = updateGoalCapacity(userId, currentCycle.id, goalId, body.name, body.targetAmount);
+    sendJson(response, 200, {
+      ok: true,
+      goal: serializeGoal(goal),
+      goals: listGoalsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  if (method === "DELETE" && !action) {
+    const goal = deleteGoalById(userId, currentCycle.id, goalId);
+    sendJson(response, 200, {
+      ok: true,
+      goal: serializeGoal(goal),
+      goals: listGoalsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  if (method === "POST" && action === "save") {
+    const goal = saveGoalAmount(userId, currentCycle.id, goalId, body.amount);
+    sendJson(response, 200, {
+      ok: true,
+      goal: serializeGoal(goal),
+      goals: listGoalsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  if (method === "POST" && action === "remove") {
+    const goal = removeGoalAmount(userId, currentCycle.id, goalId, body.amount);
+    sendJson(response, 200, {
+      ok: true,
+      goal: serializeGoal(goal),
+      goals: listGoalsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  sendJson(response, 405, { error: "method_not_allowed" });
+}
+
 function serveStatic(request, response, pathname) {
   let filePath = pathname === "/" ? "/index.html" : pathname;
   const normalized = path.normalize(path.join(root, decodeURIComponent(filePath)));
@@ -1153,6 +1488,14 @@ const server = http.createServer(async (request, response) => {
         ...result,
         movements: listMovementsByCycle(context.user.id, result.currentCycle.id),
       });
+      return;
+    }
+
+    if (pathname.startsWith("/api/goals")) {
+      const context = requireAuth(request, response);
+      if (!context) return;
+      const body = method === "GET" || method === "DELETE" ? {} : await readJsonBody(request);
+      handleGoals(request, response, context, pathname, method, body);
       return;
     }
 
