@@ -259,16 +259,27 @@ async function bootApp() {
     state.user = me.user;
     state.authStatus = "authenticated";
     setAuthMode("authenticated");
-    await loadUserData();
-    updateAuthShell();
-    render();
-    maybeOfferMigration();
-  } catch {
+  } catch (error) {
     state.user = null;
     state.authStatus = "guest";
     setAuthMode("guest");
     updateAuthShell();
+    if (error?.code !== "unauthorized") {
+      setAuthMessage(authErrorMessage(error));
+    }
+    return;
   }
+
+  try {
+    await loadUserData();
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showToast(authErrorMessage(error), "neutral");
+  }
+
+  updateAuthShell();
+  render();
+  maybeOfferMigration();
 }
 
 function registerServiceWorker() {
@@ -1543,5 +1554,1066 @@ function escapeHtml(value) {
     }[char];
   });
 }
+
+function getAppBasePath() {
+  const pathname = String(window.location?.pathname || "/");
+  const segment = pathname.split("/").filter(Boolean)[0] || "";
+  return segment.toLowerCase() === "pulso" ? "/pulso" : "";
+}
+
+function resolveAppUrl(pathname) {
+  if (!pathname) return "";
+  if (/^(?:[a-z]+:|\/\/|blob:|data:)/i.test(pathname)) return pathname;
+
+  const basePath = getAppBasePath();
+  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  if (!basePath) return path;
+  if (path === basePath || path.startsWith(`${basePath}/`)) return path;
+  return `${basePath}${path}`;
+}
+
+function resolveReceiptUrl(url) {
+  if (!url) return "";
+  if (/^(?:[a-z]+:|\/\/|blob:|data:)/i.test(url)) return url;
+  return resolveAppUrl(url);
+}
+
+async function apiRequest(url, options = {}) {
+  const body = options.body;
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
+  const headers = { ...(options.headers || {}) };
+  let requestBody = body;
+
+  if (body && !isFormData && !isBlob && typeof body === "object" && !(body instanceof ArrayBuffer)) {
+    headers["Content-Type"] = headers["Content-Type"] || "application/json";
+    requestBody = JSON.stringify(body);
+  }
+
+  let response;
+  try {
+    response = await fetch(resolveAppUrl(url), {
+      method: options.method || "GET",
+      credentials: "include",
+      headers,
+      body: requestBody,
+    });
+  } catch (cause) {
+    const error = new Error("Não conseguimos conectar ao servidor.");
+    error.code = "network_error";
+    error.cause = cause;
+    throw error;
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) {
+    const error = new Error(payload?.message || payload?.error || response.statusText || "Request failed");
+    error.code = payload?.error || "request_failed";
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+function setAuthMessage(message) {
+  elements.authMessage.textContent = message || "";
+}
+
+function authErrorMessage(error) {
+  if (!error) return "Nao foi possivel continuar.";
+  if (error.code === "email_in_use") return "Esse e-mail ja esta em uso.";
+  if (error.code === "invalid_credentials") return "E-mail ou senha invalidos.";
+  if (error.code === "unauthorized") return "Sua sessao expirou. Entre novamente.";
+  if (error.code === "network_error") return "Não conseguimos conectar ao servidor.";
+  return error.message || "Nao foi possivel continuar.";
+}
+
+function handleUnauthorizedError(error) {
+  if (error?.code !== "unauthorized") return false;
+  void logout();
+  return true;
+}
+
+async function submitRegister(event) {
+  event.preventDefault();
+  try {
+    setAuthMessage("Criando sua conta...");
+    await apiRequest("/auth/register", {
+      method: "POST",
+      body: {
+        email: elements.registerEmail.value,
+        password: elements.registerPassword.value,
+      },
+    });
+    await bootApp();
+    setAuthMessage("");
+  } catch (error) {
+    setAuthMessage(authErrorMessage(error));
+  }
+}
+
+async function logout() {
+  try {
+    await apiRequest("/auth/logout", { method: "POST" });
+  } catch {
+    // logout local continua
+  }
+
+  state.user = null;
+  state.currentCycle = null;
+  state.cycles = [];
+  state.cycleDetail = null;
+  state.goals = [];
+  state.movements = [];
+  state.selectedCategory = "";
+  state.activeTab = "summary";
+  state.activeFilter = "all";
+  state.formType = "expense";
+  state.analysisType = "expense";
+  state.activeAnalysisCategory = "";
+  state.pendingDeleteCategory = "";
+  state.pendingDeleteGoal = "";
+  state.pendingCloseCycle = false;
+  state.authStatus = "guest";
+  setAuthMode("guest");
+  updateAuthShell();
+  setAuthTab("login");
+  closeSheet();
+  closeCategorySheet();
+  closeMigrationSheet();
+  closeGoalSheet();
+  closeGoalAmountSheet();
+  closeCycleSheet();
+  closeCycleDetailSheet();
+  resetReceiptDraft();
+  render();
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  try {
+    setAuthMessage("Entrando...");
+    await apiRequest("/auth/login", {
+      method: "POST",
+      body: {
+        email: elements.loginEmail.value,
+        password: elements.loginPassword.value,
+      },
+    });
+    await bootApp();
+    setAuthMessage("");
+  } catch (error) {
+    setAuthMessage(authErrorMessage(error));
+  }
+}
+
+async function loadUserData() {
+  const bootstrap = await apiRequest("/api/bootstrap");
+  state.user = bootstrap.user || state.user;
+  state.currentCycle = normalizeCyclePayload(bootstrap.currentCycle);
+  state.cycles = normalizeCyclesPayload(bootstrap.cycles);
+  state.goals = normalizeGoalsPayload(bootstrap.goals);
+  applyCategoryPayload(bootstrap.categories);
+  state.movements = normalizeMovementsPayload(bootstrap.movements);
+  state.cycleDetail = null;
+
+  if (!getCategoriesForType(state.formType).includes(state.selectedCategory)) {
+    state.selectedCategory = "";
+  }
+
+  updateCategoryField();
+  syncReceiptPanel();
+}
+
+function hasLegacyLocalData() {
+  try {
+    const movements = localStorage.getItem(STORAGE_KEY);
+    const categories = localStorage.getItem(CATEGORY_STORAGE_KEY);
+    return Boolean((movements && movements !== "[]") || (categories && categories !== "{}"));
+  } catch {
+    return false;
+  }
+}
+
+function getLegacySnapshot() {
+  try {
+    const movements = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const categories = JSON.parse(localStorage.getItem(CATEGORY_STORAGE_KEY) || "{}");
+    return {
+      movements: Array.isArray(movements) ? movements : [],
+      categories: {
+        income: Array.isArray(categories.income) ? categories.income : [],
+        expense: Array.isArray(categories.expense) ? categories.expense : [],
+      },
+    };
+  } catch {
+    return { movements: [], categories: { income: [], expense: [] } };
+  }
+}
+
+function maybeOfferMigration() {
+  if (state.authStatus !== "authenticated") return;
+  if (!hasLegacyLocalData()) return;
+
+  const skipped = localStorage.getItem(SKIPPED_MIGRATION_KEY);
+  const imported = localStorage.getItem(MIGRATION_FLAG_KEY);
+  if (imported || skipped === state.user?.email) return;
+
+  state.migrationVisible = true;
+  elements.migrationCopy.textContent = "Encontramos dados salvos neste aparelho. Deseja importar para sua conta?";
+  elements.migrationNote.textContent = "Isso não apaga os dados locais de origem até a importação concluir.";
+  elements.migrationSheet.classList.add("open");
+  elements.migrationSheet.setAttribute("aria-hidden", "false");
+}
+
+function dismissMigrationPrompt() {
+  state.migrationVisible = false;
+  if (state.user?.email) {
+    localStorage.setItem(SKIPPED_MIGRATION_KEY, state.user.email);
+  }
+  closeMigrationSheet();
+}
+
+function closeMigrationSheet() {
+  elements.migrationSheet.classList.remove("open");
+  elements.migrationSheet.setAttribute("aria-hidden", "true");
+}
+
+async function importLocalData() {
+  const snapshot = getLegacySnapshot();
+  if (!snapshot.movements.length && !snapshot.categories.income.length && !snapshot.categories.expense.length) {
+    dismissMigrationPrompt();
+    return;
+  }
+
+  try {
+    elements.importLocalData.disabled = true;
+    elements.importLocalData.textContent = "Importando...";
+    const result = await apiRequest("/api/import/local", {
+      method: "POST",
+      body: snapshot,
+    });
+
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(CATEGORY_STORAGE_KEY);
+    localStorage.setItem(MIGRATION_FLAG_KEY, state.user?.email || "1");
+    localStorage.removeItem(SKIPPED_MIGRATION_KEY);
+
+    await loadUserData();
+    render({ pulse: true });
+    showToast(`Dados importados (${result.importedMovements} lançamentos)`, "success");
+    dismissMigrationPrompt();
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showToast(authErrorMessage(error), "neutral");
+  } finally {
+    elements.importLocalData.disabled = false;
+    elements.importLocalData.textContent = "Importar agora";
+  }
+}
+
+function applyCategoryPayload(payload) {
+  const income = Array.isArray(payload?.income) ? payload.income : [];
+  const expense = Array.isArray(payload?.expense) ? payload.expense : [];
+  state.categoryRecords = {
+    income: income.map(normalizeCategoryRecord),
+    expense: expense.map(normalizeCategoryRecord),
+  };
+  state.categories = {
+    income: state.categoryRecords.income.map((item) => item.name),
+    expense: state.categoryRecords.expense.map((item) => item.name),
+  };
+}
+
+function normalizeCategoryRecord(item) {
+  return {
+    id: item.id,
+    type: item.type,
+    name: normalizeCategoryName(item.name),
+    slug: item.slug,
+    isDefault: Boolean(item.isDefault),
+  };
+}
+
+function normalizeCyclePayload(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    userId: item.userId,
+    label: item.label,
+    status: item.status,
+    startedAt: item.startedAt,
+    closedAt: item.closedAt,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    incomeTotal: Number(item.incomeTotal || 0),
+    expenseTotal: Number(item.expenseTotal || 0),
+    balance: Number(item.balance || 0),
+    movementCount: Number(item.movementCount || 0),
+  };
+}
+
+function normalizeCyclesPayload(items) {
+  return Array.isArray(items) ? items.map(normalizeCyclePayload).filter(Boolean) : [];
+}
+
+function normalizeGoalsPayload(items) {
+  return Array.isArray(items)
+    ? items.map((item) => ({
+        id: item.id,
+        cycleId: item.cycleId,
+        name: normalizeGoalName(item.name),
+        slug: item.slug,
+        targetAmount: Number(item.targetAmount || 0),
+        savedAmount: Number(item.savedAmount || 0),
+        remainingAmount: Number(item.remainingAmount || 0),
+        progress: Number(item.progress || 0),
+      }))
+    : [];
+}
+
+function normalizeMovementsPayload(items) {
+  return Array.isArray(items)
+    ? items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        amount: Number(item.amount),
+        categoryId: item.categoryId,
+        category: normalizeCategoryName(item.categoryName || item.category || ""),
+        description: item.description,
+        date: item.date,
+        receipt: item.receipt
+          ? {
+              storedName: item.receipt.storedName || item.receipt.stored_name || null,
+              originalName: item.receipt.originalName || item.receipt.original_name || null,
+              mimeType: item.receipt.mimeType || item.receipt.mime_type || null,
+              size: Number(item.receipt.size || item.receipt.receiptSize || 0),
+              uploadedAt: item.receipt.uploadedAt || item.receipt.uploaded_at || null,
+              url: item.receipt.url || "",
+              kind: item.receipt.kind || (item.receipt.mimeType === "application/pdf" ? "pdf" : "image"),
+            }
+          : null,
+      }))
+    : [];
+}
+
+function resetReceiptDraft() {
+  if (state.receiptDraft.previewUrl) {
+    URL.revokeObjectURL(state.receiptDraft.previewUrl);
+  }
+
+  state.receiptDraft.file = null;
+  state.receiptDraft.previewUrl = "";
+  state.receiptDraft.mode = "";
+  state.receiptDraft.existing = null;
+  state.receiptDraft.removeExisting = false;
+  state.receiptDraft.processing = false;
+  state.receiptDraft.selectionToken += 1;
+
+  if (elements.receiptInput) {
+    elements.receiptInput.value = "";
+  }
+
+  syncReceiptPanel();
+}
+
+function syncReceiptPanel() {
+  if (!elements.receiptPanel) return;
+
+  const visible = state.formType === "expense";
+  elements.receiptPanel.hidden = !visible;
+  if (!visible) return;
+
+  const activeReceipt = state.receiptDraft.file
+    ? {
+        kind: state.receiptDraft.mode === "pdf" || state.receiptDraft.file.type === "application/pdf" ? "pdf" : "image",
+        originalName: state.receiptDraft.file.name,
+        mimeType: state.receiptDraft.file.type,
+        size: state.receiptDraft.file.size,
+        previewUrl: state.receiptDraft.previewUrl,
+        url: state.receiptDraft.previewUrl,
+      }
+    : state.receiptDraft.removeExisting
+      ? null
+      : state.receiptDraft.existing;
+
+  elements.receiptStatus.textContent = state.receiptDraft.processing
+    ? "Processando imagem..."
+    : activeReceipt
+      ? state.receiptDraft.file
+        ? "Comprovante pronto para salvar."
+        : "Comprovante anexado neste lançamento."
+      : state.receiptDraft.removeExisting
+        ? "Comprovante marcado para remoção."
+        : "Adicione uma imagem ou PDF ao lançamento.";
+
+  elements.receiptPreview.innerHTML = renderReceiptPreview(activeReceipt);
+
+  const hasReceipt = Boolean(activeReceipt);
+  elements.receiptOpen.hidden = !hasReceipt;
+  elements.receiptReplace.hidden = !hasReceipt && !state.receiptDraft.existing;
+  elements.receiptRemove.hidden = !hasReceipt && !state.receiptDraft.existing;
+  elements.receiptOpen.disabled = !hasReceipt;
+  elements.receiptHint.textContent = hasReceipt
+    ? "Você pode abrir, substituir ou remover. Imagens até 5 MB, PDFs até 10 MB."
+    : "Imagem até 5 MB, PDF até 10 MB.";
+}
+
+function bindEvents() {
+  elements.authTabs.forEach((button) => {
+    button.addEventListener("click", () => setAuthTab(button.dataset.authTab));
+  });
+
+  elements.loginForm.addEventListener("submit", (event) => {
+    void submitLogin(event);
+  });
+
+  elements.registerForm.addEventListener("submit", (event) => {
+    void submitRegister(event);
+  });
+
+  $$(".nav-tab").forEach((button) => {
+    button.addEventListener("click", () => setActiveTab(button.dataset.tab));
+  });
+
+  $$("[data-open-tab]").forEach((button) => {
+    button.addEventListener("click", () => setActiveTab(button.dataset.openTab));
+  });
+
+  $$(".filter-pill").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeFilter = button.dataset.filter;
+      $$(".filter-pill").forEach((pill) => pill.classList.toggle("active", pill === button));
+      renderHistory();
+    });
+  });
+
+  elements.analysisTypeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.analysisType = button.dataset.analysisType;
+      state.activeAnalysisCategory = "";
+      elements.analysisTypeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      renderAnalysis(getTotals());
+    });
+  });
+
+  $("#open-form").addEventListener("click", () => openSheet());
+  elements.categorySelect.addEventListener("click", openCategorySheet);
+  elements.receiptOpen.addEventListener("click", openCurrentReceipt);
+  elements.receiptReplace.addEventListener("click", () => openReceiptPicker(state.receiptDraft.existing?.kind === "pdf" ? "pdf" : "image"));
+  elements.receiptRemove.addEventListener("click", () => removeReceiptSelection());
+  elements.receiptGallery.addEventListener("click", () => openReceiptPicker("image"));
+  elements.receiptPdf.addEventListener("click", () => openReceiptPicker("pdf"));
+  elements.receiptInput.addEventListener("change", () => {
+    const file = elements.receiptInput.files?.[0] || null;
+    if (file) {
+      void applyReceiptSelection(file);
+    } else {
+      resetReceiptDraft();
+    }
+  });
+
+  $$("[data-close-sheet]").forEach((element) => {
+    element.addEventListener("click", closeSheet);
+  });
+
+  $$("[data-close-category-sheet]").forEach((element) => {
+    element.addEventListener("click", closeCategorySheet);
+  });
+
+  $$("[data-close-migration-sheet]").forEach((element) => {
+    element.addEventListener("click", dismissMigrationPrompt);
+  });
+
+  $$("[data-close-goal-sheet]").forEach((element) => {
+    element.addEventListener("click", closeGoalSheet);
+  });
+
+  $$("[data-close-goal-amount-sheet]").forEach((element) => {
+    element.addEventListener("click", closeGoalAmountSheet);
+  });
+
+  $$("[data-close-cycle-sheet]").forEach((element) => {
+    element.addEventListener("click", closeCycleSheet);
+  });
+
+  $$("[data-close-cycle-detail]").forEach((element) => {
+    element.addEventListener("click", closeCycleDetailSheet);
+  });
+
+  $$(".toggle-option").forEach((button) => {
+    button.addEventListener("click", () => setFormType(button.dataset.type));
+  });
+
+  elements.amount.addEventListener("input", () => {
+    elements.amount.value = sanitizeMoneyInput(elements.amount.value);
+  });
+  elements.amount.addEventListener("blur", () => {
+    const amount = parseMoney(elements.amount.value);
+    elements.amount.value = amount ? formatMoneyInput(amount) : "";
+  });
+  elements.amount.addEventListener("focus", () => {
+    elements.amount.select();
+  });
+
+  elements.goalTarget.addEventListener("input", () => {
+    elements.goalTarget.value = sanitizeMoneyInput(elements.goalTarget.value);
+  });
+  elements.goalTarget.addEventListener("blur", () => {
+    const amount = parseMoney(elements.goalTarget.value);
+    elements.goalTarget.value = amount ? formatMoneyInput(amount) : "";
+  });
+  elements.goalTarget.addEventListener("focus", () => {
+    elements.goalTarget.select();
+  });
+
+  elements.goalAmount.addEventListener("input", () => {
+    elements.goalAmount.value = sanitizeMoneyInput(elements.goalAmount.value);
+  });
+  elements.goalAmount.addEventListener("blur", () => {
+    const amount = parseMoney(elements.goalAmount.value);
+    elements.goalAmount.value = amount ? formatMoneyInput(amount) : "";
+  });
+  elements.goalAmount.addEventListener("focus", () => {
+    elements.goalAmount.select();
+  });
+
+  elements.form.addEventListener("submit", saveMovement);
+  elements.goalForm.addEventListener("submit", saveGoal);
+  elements.goalAmountForm.addEventListener("submit", submitGoalAmount);
+  elements.saveCategory.addEventListener("click", () => {
+    void saveNewCategory();
+  });
+  elements.newCategoryName.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void saveNewCategory();
+    }
+  });
+
+  elements.openGoalSheet.addEventListener("click", () => openGoalSheet());
+  elements.openCloseCycle.addEventListener("click", () => openCloseCycleSheet());
+  elements.openCloseCycleCta.addEventListener("click", () => openCloseCycleSheet());
+  elements.confirmCloseCycle.addEventListener("click", () => {
+    void confirmCloseCycle();
+  });
+
+  elements.goalList.addEventListener("click", (event) => {
+    const saveButton = event.target.closest("[data-goal-save]");
+    if (saveButton) {
+      const goal = state.goals.find((item) => item.id === saveButton.dataset.goalSave);
+      if (goal) openGoalAmountSheet(goal, "save");
+      return;
+    }
+
+    const removeButton = event.target.closest("[data-goal-remove]");
+    if (removeButton) {
+      const goal = state.goals.find((item) => item.id === removeButton.dataset.goalRemove);
+      if (goal) openGoalAmountSheet(goal, "remove");
+      return;
+    }
+
+    const editButton = event.target.closest("[data-goal-edit]");
+    if (editButton) {
+      const goal = state.goals.find((item) => item.id === editButton.dataset.goalEdit);
+      if (goal) openGoalSheet(goal);
+      return;
+    }
+
+    const deleteButton = event.target.closest("[data-goal-delete]");
+    if (deleteButton) {
+      const goal = state.goals.find((item) => item.id === deleteButton.dataset.goalDelete);
+      if (goal) requestGoalDelete(goal);
+    }
+  });
+
+  elements.logoutButton.addEventListener("click", () => {
+    void logout();
+  });
+
+  elements.importLocalData.addEventListener("click", () => {
+    void importLocalData();
+  });
+
+  elements.skipLocalData.addEventListener("click", () => {
+    dismissMigrationPrompt();
+  });
+}
+
+function updateCategoryField() {
+  elements.categoryContext.textContent = state.formType === "income" ? "para entrada" : "para saída";
+  elements.category.value = state.selectedCategory;
+  elements.categorySelect.classList.toggle("has-value", Boolean(state.selectedCategory));
+  elements.categorySelectLabel.textContent = state.selectedCategory ? capitalize(state.selectedCategory) : "Escolher categoria";
+}
+
+function setActiveTab(tab) {
+  state.activeTab = tab;
+  $$(".nav-tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+  $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tab}`));
+  const panel = $(`#tab-${tab}`);
+  elements.screenTitle.textContent = panel.dataset.title;
+  elements.screenPeriod.textContent = tab === "history" ? "Linha do tempo" : periodLabel(tab);
+}
+
+function openSheet(movement = null) {
+  elements.form.reset();
+  elements.date.value = new Date().toISOString().slice(0, 10);
+  elements.movementId.value = "";
+  elements.formTitle.textContent = "Adicionar rápido";
+  resetReceiptDraft();
+  setFormType("expense", { preserveCategory: false });
+
+  if (movement) {
+    elements.formTitle.textContent = "Editar movimento";
+    elements.movementId.value = movement.id;
+    elements.amount.value = formatMoneyInput(movement.amount);
+    elements.description.value = movement.description;
+    elements.date.value = movement.date;
+    setFormType(movement.type, { preserveCategory: true });
+    selectCategory(movement.category || movement.categoryName || getCategoryNameById(movement.categoryId));
+    state.receiptDraft.existing = movement.receipt || null;
+    state.receiptDraft.removeExisting = false;
+    syncReceiptPanel();
+  }
+
+  elements.sheet.classList.add("open");
+  elements.sheet.setAttribute("aria-hidden", "false");
+  setTimeout(() => elements.amount.focus(), 120);
+}
+
+function closeSheet() {
+  elements.sheet.classList.remove("open");
+  elements.sheet.setAttribute("aria-hidden", "true");
+}
+
+function setFormType(type, options = {}) {
+  state.formType = type;
+  $$(".toggle-option").forEach((button) => button.classList.toggle("active", button.dataset.type === type));
+  const currentIsValid = getCategoriesForType(type).includes(state.selectedCategory);
+  if (!options.preserveCategory || !currentIsValid) {
+    state.selectedCategory = "";
+  }
+  if (type !== "expense") {
+    resetReceiptDraft();
+  } else {
+    syncReceiptPanel();
+  }
+  updateCategoryField();
+}
+
+function selectCategory(category) {
+  state.selectedCategory = category;
+  updateCategoryField();
+  if (elements.categorySheet && elements.categorySheet.classList.contains("open")) {
+    renderCategoryList();
+  }
+}
+
+function openGoalSheet(goal = null) {
+  closeSheet();
+  closeCategorySheet();
+  closeCycleSheet();
+  closeCycleDetailSheet();
+  state.pendingDeleteGoal = "";
+  clearTimeout(requestGoalDelete.timeout);
+  if (elements.goalsFeedback) {
+    elements.goalsFeedback.textContent = "";
+    elements.goalsFeedback.classList.remove("show");
+  }
+  elements.goalForm.reset();
+  elements.goalId.value = "";
+  elements.goalSheetTitle.textContent = "Nova meta";
+  elements.saveGoal.textContent = "Salvar meta";
+
+  if (goal) {
+    elements.goalId.value = goal.id;
+    elements.goalSheetTitle.textContent = "Editar meta";
+    elements.saveGoal.textContent = "Salvar alterações";
+    elements.goalName.value = goal.name;
+    elements.goalTarget.value = formatMoneyInput(goal.targetAmount);
+  }
+
+  elements.goalSheet.classList.add("open");
+  elements.goalSheet.setAttribute("aria-hidden", "false");
+  setTimeout(() => elements.goalName.focus(), 120);
+}
+
+function closeGoalSheet() {
+  elements.goalSheet.classList.remove("open");
+  elements.goalSheet.setAttribute("aria-hidden", "true");
+}
+
+function openGoalAmountSheet(goal, mode) {
+  if (!goal || !mode) return;
+  closeSheet();
+  closeCategorySheet();
+  closeCycleSheet();
+  closeCycleDetailSheet();
+  state.pendingDeleteGoal = "";
+  clearTimeout(requestGoalDelete.timeout);
+  if (elements.goalsFeedback) {
+    elements.goalsFeedback.textContent = "";
+    elements.goalsFeedback.classList.remove("show");
+  }
+  elements.goalAmountForm.reset();
+  elements.goalActionId.value = goal.id;
+  elements.goalActionMode.value = mode;
+  elements.goalAmountSheetTitle.textContent = mode === "remove" ? "Remover valor" : "Guardar valor";
+  elements.goalAmountSheetCopy.textContent = mode === "remove"
+    ? `Quanto você quer devolver de ${capitalize(goal.name)}?`
+    : `Quanto você quer guardar em ${capitalize(goal.name)}?`;
+  elements.goalAmountNote.textContent = mode === "remove"
+    ? `Guardado agora: ${currency.format(goal.savedAmount)}.`
+    : `Saldo disponível: ${currency.format(getAvailableBalance(getTotals()))}.`;
+  elements.confirmGoalAmount.textContent = mode === "remove" ? "Remover valor" : "Guardar valor";
+  elements.goalAmount.value = "";
+  elements.goalAmountSheet.classList.add("open");
+  elements.goalAmountSheet.setAttribute("aria-hidden", "false");
+  setTimeout(() => elements.goalAmount.focus(), 120);
+}
+
+function closeGoalAmountSheet() {
+  elements.goalAmountSheet.classList.remove("open");
+  elements.goalAmountSheet.setAttribute("aria-hidden", "true");
+}
+
+async function saveGoal(event) {
+  event.preventDefault();
+  const goalId = elements.goalId.value.trim();
+  const payload = {
+    name: normalizeGoalName(elements.goalName.value),
+    targetAmount: parseMoney(elements.goalTarget.value),
+  };
+
+  if (!payload.name || payload.targetAmount <= 0) {
+    showGoalFeedback("Informe um nome e um valor alvo válidos.");
+    return;
+  }
+
+  try {
+    if (goalId) {
+      await apiRequest(`/api/goals/${encodeURIComponent(goalId)}`, {
+        method: "PUT",
+        body: payload,
+      });
+      showToast("Meta atualizada", "success");
+    } else {
+      await apiRequest("/api/goals", {
+        method: "POST",
+        body: payload,
+      });
+      showToast("Meta criada", "success");
+    }
+
+    await loadUserData();
+    closeGoalSheet();
+    render({ pulse: true });
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showGoalFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+async function submitGoalAmount(event) {
+  event.preventDefault();
+  const goalId = elements.goalActionId.value.trim();
+  const mode = elements.goalActionMode.value;
+  const goal = state.goals.find((item) => item.id === goalId);
+  if (!goal || !mode) return;
+
+  const amount = parseMoney(elements.goalAmount.value);
+  const available = getAvailableBalance(getTotals());
+
+  if (amount <= 0) {
+    showGoalFeedback("Informe um valor válido.");
+    return;
+  }
+
+  if (mode === "save" && amount > available) {
+    showGoalFeedback("Não há saldo disponível suficiente para guardar nessa meta.");
+    return;
+  }
+
+  if (mode === "remove" && amount > goal.savedAmount) {
+    showGoalFeedback("Não há valor suficiente guardado nessa meta.");
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/goals/${encodeURIComponent(goalId)}/${mode}`, {
+      method: "POST",
+      body: { amount },
+    });
+    await loadUserData();
+    closeGoalAmountSheet();
+    render({ pulse: true });
+    showToast(mode === "save" ? "Valor guardado na meta" : "Valor devolvido ao saldo", "success");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showGoalFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+function requestGoalDelete(goal) {
+  if (!goal) return;
+
+  if (state.pendingDeleteGoal === goal.id) {
+    void deleteGoal(goal.id);
+    return;
+  }
+
+  state.pendingDeleteGoal = goal.id;
+  showGoalFeedback(goal.savedAmount > 0
+    ? "Toque novamente em Excluir para confirmar. O valor guardado volta ao saldo disponível."
+    : "Toque novamente em Excluir para confirmar.");
+  showToast("Confirme a exclusão", "neutral");
+
+  clearTimeout(requestGoalDelete.timeout);
+  requestGoalDelete.timeout = setTimeout(() => {
+    if (state.pendingDeleteGoal === goal.id) {
+      state.pendingDeleteGoal = "";
+      if (elements.goalsFeedback.textContent) {
+        elements.goalsFeedback.textContent = "";
+        elements.goalsFeedback.classList.remove("show");
+      }
+      renderGoals(getTotals());
+    }
+  }, 4200);
+}
+
+async function deleteGoal(goalId) {
+  try {
+    await apiRequest(`/api/goals/${encodeURIComponent(goalId)}`, { method: "DELETE" });
+    state.pendingDeleteGoal = "";
+    await loadUserData();
+    render({ pulse: true });
+    showToast("Meta removida", "neutral");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    state.pendingDeleteGoal = "";
+    renderGoals(getTotals());
+    showGoalFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+function showGoalFeedback(message) {
+  if (!elements.goalsFeedback) return;
+  elements.goalsFeedback.textContent = message;
+  elements.goalsFeedback.classList.remove("show");
+  requestAnimationFrame(() => elements.goalsFeedback.classList.add("show"));
+}
+
+function renderGoals(totals) {
+  const reserved = getGoalSavedTotal();
+  const available = getAvailableBalance(totals, reserved);
+  const goalCount = state.goals.length;
+
+  if (elements.goalsHeroAvailable) {
+    elements.goalsHeroAvailable.textContent = `${currency.format(available)} disponíveis`;
+  }
+  if (elements.goalsHeroCopy) {
+    elements.goalsHeroCopy.textContent = goalCount
+      ? `Você já guardou ${currency.format(reserved)} em ${goalCount} meta${goalCount === 1 ? "" : "s"} neste ciclo.`
+      : "Separe parte do saldo do ciclo e acompanhe o progresso de cada meta.";
+  }
+  if (elements.goalsSavedTotal) {
+    elements.goalsSavedTotal.textContent = currency.format(reserved);
+  }
+  if (elements.goalsCountInline) {
+    elements.goalsCountInline.textContent = String(goalCount);
+  }
+  if (elements.goalsCount) {
+    elements.goalsCount.textContent = `${goalCount} meta${goalCount === 1 ? "" : "s"}`;
+  }
+
+  if (!state.pendingDeleteGoal) {
+    elements.goalsFeedback.textContent = "";
+    elements.goalsFeedback.classList.remove("show");
+  }
+
+  elements.goalList.innerHTML = state.goals.length
+    ? state.goals.map((goal) => renderGoalCard(goal, available)).join("")
+    : renderEmptyState("Nenhuma meta ainda", "Crie um cofrinho para separar parte do saldo do ciclo.");
+}
+
+function renderGoalCard(goal, availableBalance) {
+  const progress = goal.targetAmount > 0 ? Math.round((goal.savedAmount / goal.targetAmount) * 100) : 0;
+  const fill = Math.min(progress, 100);
+  const complete = goal.savedAmount >= goal.targetAmount;
+  const pending = state.pendingDeleteGoal === goal.id;
+
+  return `<article class="goal-card ${complete ? "complete" : ""} ${pending ? "pending-delete" : ""}">
+    <div class="goal-head">
+      <div class="goal-copy">
+        <span class="mini-label">Meta</span>
+        <strong>${escapeHtml(capitalize(goal.name))}</strong>
+        <p>Guardado ${currency.format(goal.savedAmount)} · Alvo ${currency.format(goal.targetAmount)}</p>
+      </div>
+      <div class="goal-progress-copy">
+        <strong>${progress >= 100 ? "100%+" : `${progress}%`}</strong>
+        <span>${complete ? "Concluída" : "Em andamento"}</span>
+      </div>
+    </div>
+    <div class="goal-track" aria-hidden="true"><div class="goal-fill" style="width:${fill}%"></div></div>
+    <div class="goal-actions">
+      <button class="secondary-action compact goal-action" type="button" data-goal-save="${goal.id}" ${availableBalance <= 0 ? "disabled" : ""}>Guardar</button>
+      <button class="secondary-action compact goal-action" type="button" data-goal-remove="${goal.id}" ${goal.savedAmount <= 0 ? "disabled" : ""}>Remover</button>
+    </div>
+    <div class="goal-meta-actions">
+      <button class="text-button" type="button" data-goal-edit="${goal.id}">Editar</button>
+      <button class="text-button ${pending ? "pending" : ""}" type="button" data-goal-delete="${goal.id}">${pending ? "Confirmar" : "Excluir"}</button>
+    </div>
+  </article>`;
+}
+
+function openCloseCycleSheet() {
+  const currentCycle = state.currentCycle;
+  if (!currentCycle) return;
+
+  const totals = getTotals();
+  elements.cycleCloseCopy.textContent = `Você vai encerrar ${formatCycleTitle(currentCycle)}. Entradas ${currency.format(totals.income)}, saídas ${currency.format(totals.expense)} e saldo ${currency.format(totals.balance)} seguem salvos no histórico.`;
+  elements.cycleCloseNote.textContent = "Nenhum lançamento é apagado. Um novo ciclo vazio será aberto em seguida.";
+  elements.cycleCloseSheet.classList.add("open");
+  elements.cycleCloseSheet.setAttribute("aria-hidden", "false");
+}
+
+function closeCycleSheet() {
+  elements.cycleCloseSheet.classList.remove("open");
+  elements.cycleCloseSheet.setAttribute("aria-hidden", "true");
+}
+
+async function confirmCloseCycle() {
+  if (state.pendingCloseCycle) return;
+
+  try {
+    state.pendingCloseCycle = true;
+    elements.confirmCloseCycle.disabled = true;
+    elements.confirmCloseCycle.textContent = "Fechando...";
+    const result = await apiRequest("/api/cycles/close", { method: "POST" });
+    await loadUserData();
+    render({ pulse: true });
+    closeCycleSheet();
+    setActiveTab("summary");
+    showToast(result?.closedCycle ? "Ciclo fechado e novo ciclo aberto" : "Ciclo fechado", "success");
+  } catch (error) {
+    if (!handleUnauthorizedError(error)) {
+      showToast(authErrorMessage(error), "neutral");
+    }
+  } finally {
+    state.pendingCloseCycle = false;
+    elements.confirmCloseCycle.disabled = false;
+    elements.confirmCloseCycle.textContent = "Fechar agora";
+  }
+}
+
+function renderCycles() {
+  const closedCycles = state.cycles.filter((cycle) => cycle.status === "closed");
+  const activeCycle = state.currentCycle;
+
+  elements.cycleTabCurrentLabel.textContent = activeCycle ? formatCycleTitle(activeCycle) : "Ciclo atual";
+  elements.cycleTabCurrentCopy.textContent = activeCycle
+    ? `Aberto em ${formatDate(activeCycle.startedAt)}. ${currency.format(getTotals().balance)} de saldo no ciclo ativo.`
+    : "Feche o ciclo atual quando quiser virar o período.";
+
+  elements.closedCyclesCount.textContent = `${closedCycles.length} ciclo${closedCycles.length === 1 ? "" : "s"}`;
+  elements.cycleList.innerHTML = closedCycles.length
+    ? closedCycles.map(renderCycleCard).join("")
+    : renderEmptyState("Nenhum ciclo fechado", "Quando você fechar o ciclo atual, ele aparece aqui em modo somente leitura.");
+
+  elements.cycleList.querySelectorAll("[data-open-cycle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void openCycleDetail(button.dataset.openCycle);
+    });
+  });
+}
+
+function renderCycleCard(cycle) {
+  const balanceTone = cycle.balance >= 0 ? "good" : "alert";
+  const period = formatCyclePeriod(cycle);
+  return `<article class="cycle-card closed ${balanceTone}">
+    <div>
+      <span class="mini-label">${cycle.status === "active" ? "Ativo" : "Fechado"}</span>
+      <strong>${escapeHtml(cycle.label || "Ciclo")}</strong>
+      <p>${escapeHtml(period)} · ${cycle.movementCount} movimento${cycle.movementCount === 1 ? "" : "s"}</p>
+    </div>
+    <div class="cycle-card-side">
+      <strong>${currency.format(cycle.balance)}</strong>
+      <button class="text-button" type="button" data-open-cycle="${cycle.id}">Abrir</button>
+    </div>
+  </article>`;
+}
+
+async function openCycleDetail(cycleId) {
+  try {
+    const payload = await apiRequest(`/api/cycles/${encodeURIComponent(cycleId)}`);
+    state.cycleDetail = {
+      cycle: normalizeCyclePayload(payload.cycle),
+      movements: normalizeMovementsPayload(payload.movements),
+    };
+    renderCycleDetail();
+    elements.cycleDetailSheet.classList.add("open");
+    elements.cycleDetailSheet.setAttribute("aria-hidden", "false");
+  } catch (error) {
+    if (!handleUnauthorizedError(error)) {
+      showToast(authErrorMessage(error), "neutral");
+    }
+  }
+}
+
+function closeCycleDetailSheet() {
+  elements.cycleDetailSheet.classList.remove("open");
+  elements.cycleDetailSheet.setAttribute("aria-hidden", "true");
+}
+
+function renderCycleDetail() {
+  const detail = state.cycleDetail;
+  if (!detail) return;
+
+  const cycle = detail.cycle;
+  const movements = detail.movements;
+  elements.cycleDetailTitle.textContent = formatCycleTitle(cycle);
+  elements.cycleDetailPeriod.textContent = formatCyclePeriod(cycle);
+  elements.cycleDetailBalance.textContent = currency.format(cycle.balance);
+  elements.cycleDetailCount.textContent = String(cycle.movementCount || movements.length);
+  elements.cycleDetailIncome.textContent = currency.format(cycle.incomeTotal || 0);
+  elements.cycleDetailExpense.textContent = currency.format(cycle.expenseTotal || 0);
+  elements.cycleDetailList.innerHTML = renderMovementList(movements, {
+    empty: "Este ciclo não tem lançamentos.",
+  });
+}
+
+function normalizeGoalName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeCategoryName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+}
+
+window.state = state;
+window.apiRequest = apiRequest;
+window.loadUserData = loadUserData;
+window.handleUnauthorizedError = handleUnauthorizedError;
+window.authErrorMessage = authErrorMessage;
+window.setAuthMessage = setAuthMessage;
+window.resolveAppUrl = resolveAppUrl;
+window.resolveReceiptUrl = resolveReceiptUrl;
+window.getAppBasePath = getAppBasePath;
+window.openSheet = openSheet;
+window.closeSheet = closeSheet;
+window.saveMovement = saveMovement;
+window.applyReceiptSelection = applyReceiptSelection;
+window.removeReceiptSelection = removeReceiptSelection;
+window.syncReceiptPanel = syncReceiptPanel;
+window.resetReceiptDraft = resetReceiptDraft;
+window.showToast = showToast;
+window.submitLogin = submitLogin;
+window.submitRegister = submitRegister;
+window.logout = logout;
 
 
