@@ -368,11 +368,15 @@
           <div class="receipt-preview-wrap" id="receipt-preview"></div>
 
           <div class="receipt-actions">
-            <button class="secondary-action compact" type="button" id="receipt-camera">Tirar foto</button>
-            <button class="secondary-action compact" type="button" id="receipt-gallery">Escolher imagem</button>
-            <button class="secondary-action compact" type="button" id="receipt-pdf">Anexar PDF</button>
-            <button class="text-button" type="button" id="receipt-replace">Substituir</button>
-            <button class="text-button danger" type="button" id="receipt-remove">Remover</button>
+            <div class="receipt-actions-main">
+              <button class="secondary-action compact" type="button" id="receipt-camera">Tirar foto</button>
+              <button class="secondary-action compact" type="button" id="receipt-gallery">Escolher imagem</button>
+              <button class="secondary-action compact" type="button" id="receipt-pdf">Anexar PDF</button>
+            </div>
+            <div class="receipt-actions-secondary">
+              <button class="text-button" type="button" id="receipt-replace">Substituir</button>
+              <button class="text-button danger" type="button" id="receipt-remove">Remover</button>
+            </div>
           </div>
 
           <input id="receipt-input" type="file" hidden />
@@ -382,6 +386,42 @@
 
       <button class="primary-action" type="submit">Salvar movimentação</button>
     </form>
+  </section>
+
+  <section class="sheet receipt-camera-sheet" id="receipt-camera-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-receipt-camera></div>
+    <div class="movement-form receipt-camera-form" role="dialog" aria-modal="true" aria-labelledby="receipt-camera-title">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Comprovante</p>
+          <h2 id="receipt-camera-title">Tirar foto</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-receipt-camera aria-label="Fechar câmera">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="receipt-camera-stage">
+        <video id="receipt-camera-video" autoplay playsinline muted></video>
+        <div class="receipt-camera-overlay">
+          <span>Enquadre o comprovante</span>
+          <small id="receipt-camera-state">Câmera traseira preferencial</small>
+        </div>
+      </div>
+
+      <p class="form-note receipt-camera-note" id="receipt-camera-note">
+        A captura acontece dentro do app para não perder o formulário.
+      </p>
+
+      <div class="receipt-camera-actions">
+        <button class="secondary-action compact" type="button" data-close-receipt-camera>Cancelar</button>
+        <button class="primary-action compact" type="button" id="receipt-camera-capture">Capturar foto</button>
+      </div>
+    </div>
   </section>
 
   <section class="sheet category-sheet" id="category-sheet" aria-hidden="true">
@@ -574,6 +614,7 @@
   </section>
 
   <script src="./app.js"></script>
+  <script src="./receipt-camera.js"></script>
 </body>
 
 </html>
