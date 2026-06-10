@@ -46,6 +46,7 @@ const state = {
   activeFilter: "all",
   formType: "expense",
   selectedCategory: "",
+  analysisHoveredCategory: "",
   receiptDraft: {
     file: null,
     previewUrl: "",
@@ -67,6 +68,8 @@ const state = {
   pendingDeleteCategory: "",
   pendingDeleteGoal: "",
   pendingCloseCycle: false,
+  sectionSwitcherOpen: false,
+  sectionSwitcherCloseTimer: null,
   authMode: "login",
   migrationVisible: false,
 };
@@ -196,13 +199,32 @@ const elements = {
   goalAmount: $("#goal-amount"),
   goalAmountNote: $("#goal-amount-note"),
   confirmGoalAmount: $("#confirm-goal-amount"),
+  sectionSwitcherShell: $("#section-switcher-shell"),
+  sectionSwitcher: $("#section-switcher"),
+  sectionSwitcherLabel: $("#section-switcher-label"),
+  sectionSwitcherCopy: $("#section-switcher-copy"),
+  sectionSwitcherPanel: $("#section-switcher-panel"),
 };
+
+const sectionSwitcherItems = [
+  { tab: "summary", label: "Resumo", copy: "Ciclo ativo" },
+  { tab: "history", label: "Histórico", copy: "Linha do tempo" },
+  { tab: "analysis", label: "Análise", copy: "Gastos e receitas" },
+  { tab: "insights", label: "Insights", copy: "Leituras do ciclo" },
+  { tab: "goals", label: "Metas", copy: "Cofrinhos do ciclo" },
+  { tab: "cycles", label: "Ciclos", copy: "Histórico fechado" },
+];
 
 init();
 
 function init() {
   bindViewportContext();
   bindEvents();
+  renderSectionSwitcherPanel();
+  syncSectionSwitcher();
+  window.addEventListener("pageshow", () => {
+    sanitizeUiState();
+  });
   registerServiceWorker();
   bootApp();
 }
@@ -248,9 +270,16 @@ function syncViewportContext() {
   document.body.classList.toggle("has-hover", hasHover);
   document.body.dataset.context = isStandalone ? "pwa" : "browser";
   document.body.dataset.viewport = isDesktop ? "desktop" : isTablet ? "tablet" : "mobile";
+
+  if (isDesktop) {
+    closeSectionSwitcher();
+  } else {
+    syncSectionSwitcher();
+  }
 }
 
 async function bootApp() {
+  sanitizeUiState();
   setAuthMode("loading");
   updateAuthShell();
 
@@ -279,7 +308,23 @@ async function bootApp() {
 
   updateAuthShell();
   render();
+  closeSheet();
   maybeOfferMigration();
+}
+
+function sanitizeUiState() {
+  closeSheet();
+  closeCategorySheet();
+  closeMigrationSheet();
+  closeGoalSheet();
+  closeGoalAmountSheet();
+  closeCycleSheet();
+  closeCycleDetailSheet();
+  state.analysisHoveredCategory = "";
+  state.sectionSwitcherOpen = false;
+  clearTimeout(state.sectionSwitcherCloseTimer);
+  syncSectionSwitcher();
+  resetReceiptDraft();
 }
 
 function registerServiceWorker() {
@@ -922,6 +967,7 @@ async function saveMovement(event) {
     }
 
     await loadUserData();
+    setHistoryFilter("all");
     render({ pulse: true });
     if (receiptError) {
       elements.receiptStatus.textContent = authErrorMessage(receiptError);
@@ -946,6 +992,7 @@ async function deleteMovement(id, element) {
     try {
       await apiRequest(`/api/movements/${encodeURIComponent(id)}`, { method: "DELETE" });
       await loadUserData();
+      setHistoryFilter("all");
       render({ pulse: true });
       showToast("Movimentação excluída", "neutral");
     } catch (error) {
@@ -1054,6 +1101,12 @@ function renderHistory() {
   });
 }
 
+function setHistoryFilter(filter) {
+  state.activeFilter = filter;
+  $$(".filter-pill").forEach((pill) => pill.classList.toggle("active", pill.dataset.filter === filter));
+  renderHistory();
+}
+
 function renderAnalysis(totals) {
   const grouped = groupMovementsByCategory(state.analysisType);
   const top = grouped[0];
@@ -1075,12 +1128,14 @@ function renderAnalysis(totals) {
     return;
   }
 
+  const hovered = grouped.find((item) => sameCategory(item.category, state.analysisHoveredCategory)) || null;
   const active = grouped.find((item) => sameCategory(item.category, state.activeAnalysisCategory)) || null;
-  const focused = active || top;
+  const focused = hovered || active || top;
   const movementLabel = state.analysisType === "expense" ? "saídas" : "entradas";
   updateAnalysisFocus(focused, typeTotal);
   elements.categoryBars.innerHTML = grouped.map((item) => renderCategoryRow(item, typeTotal, movementLabel, sameCategory(item.category, state.activeAnalysisCategory))).join("");
-  renderPieChart(grouped, typeTotal, focused.category);
+  renderPieChart(grouped, typeTotal);
+  syncAnalysisVisualState(grouped, typeTotal);
 }
 
 function renderInsights(totals) {
@@ -1138,7 +1193,7 @@ function renderCategoryRow(item, total, movementLabel, expanded = false) {
   const share = Math.round((item.total / total) * 100);
   const meta = getCategoryMeta(item.category);
   const movements = expanded ? renderAnalysisMovements(item.category) : "";
-  return `<article class="category-row ${expanded ? "expanded" : ""}" style="--category-color:${meta.color}">
+  return `<article class="category-row ${expanded ? "expanded" : ""}" data-category="${escapeHtml(item.category)}" style="--category-color:${meta.color}">
     <button class="category-row-toggle" type="button" data-category-toggle="${escapeHtml(item.category)}" aria-expanded="${expanded}">
       <div class="category-meta">
         <span><i>${meta.icon}</i>${capitalize(item.category)}</span>
@@ -1154,31 +1209,100 @@ function renderCategoryRow(item, total, movementLabel, expanded = false) {
   </article>`;
 }
 
-function renderPieChart(grouped, total, focusedCategory = "") {
-  let startAngle = -90;
-  elements.categoryDonut.innerHTML = `<svg viewBox="0 0 120 120" role="img" aria-label="Distribuição por categoria">
-    ${grouped
-      .map((item, index) => {
-        const angle = (item.total / total) * 360;
-        const endAngle = startAngle + angle;
-        const selected = sameCategory(item.category, focusedCategory);
-        const color = getCategoryColor(item.category, index);
-        const path = describeDonutSlice(60, 60, 52, 34, startAngle, endAngle);
-        startAngle = endAngle;
-        return `<path class="pie-slice ${selected ? "active" : ""}" d="${path}" fill="${color}" fill-rule="evenodd" data-category="${item.category}" data-index="${index}" />`;
-      })
-      .join("")}
-  </svg>`;
+function renderPieChart(grouped, total) {
+  if (grouped.length === 1) {
+    const item = grouped[0];
+    const color = getCategoryColor(item.category, 0);
+    const radius = 34;
+    const strokeWidth = 18;
+    const circumference = (2 * Math.PI * radius).toFixed(3);
+
+    elements.categoryDonut.innerHTML = `<svg viewBox="0 0 120 120" role="img" aria-label="Distribuição por categoria">
+      <circle class="pie-track" cx="60" cy="60" r="${radius}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="${strokeWidth}" />
+      <circle class="pie-slice single" cx="60" cy="60" r="${radius}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-dasharray="${circumference}" stroke-dashoffset="0" data-category="${escapeHtml(item.category)}" data-index="0" />
+    </svg>`;
+  } else {
+    let startAngle = -90;
+    elements.categoryDonut.innerHTML = `<svg viewBox="0 0 120 120" role="img" aria-label="Distribuição por categoria">
+      ${grouped
+        .map((item, index) => {
+          const angle = (item.total / total) * 360;
+          const endAngle = startAngle + angle;
+          const color = getCategoryColor(item.category, index);
+          const path = describeDonutSlice(60, 60, 52, 34, startAngle, endAngle);
+          startAngle = endAngle;
+          return `<path class="pie-slice" d="${path}" fill="${color}" fill-rule="evenodd" data-category="${item.category}" data-index="${index}" />`;
+        })
+        .join("")}
+    </svg>`;
+  }
+
+  bindAnalysisInteractions(grouped, total);
+}
+
+function bindAnalysisInteractions(grouped, total) {
+  const activateHover = (category, pointerType = "mouse") => {
+    if (!category) return;
+    if (pointerType && pointerType !== "mouse") return;
+    if (sameCategory(state.analysisHoveredCategory, category)) return;
+    state.analysisHoveredCategory = category;
+    syncAnalysisVisualState(grouped, total);
+  };
+
+  const clearHover = (category) => {
+    if (category && !sameCategory(state.analysisHoveredCategory, category)) return;
+    if (!state.analysisHoveredCategory) return;
+    state.analysisHoveredCategory = "";
+    syncAnalysisVisualState(grouped, total);
+  };
 
   elements.categoryDonut.querySelectorAll("[data-category]").forEach((slice) => {
-    const activate = () => {
-      const item = grouped.find((entry) => entry.category === slice.dataset.category);
-      if (!item) return;
-      state.activeAnalysisCategory = sameCategory(state.activeAnalysisCategory, item.category) ? "" : item.category;
+    const category = slice.dataset.category || "";
+    slice.addEventListener("pointerenter", (event) => activateHover(category, event.pointerType));
+    slice.addEventListener("pointerleave", () => clearHover(category));
+    slice.addEventListener("click", () => {
+      if (!category) return;
+      state.activeAnalysisCategory = sameCategory(state.activeAnalysisCategory, category) ? "" : category;
+      state.analysisHoveredCategory = "";
       renderAnalysis(getTotals());
-    };
-    slice.addEventListener("pointerenter", activate);
-    slice.addEventListener("click", activate);
+    });
+  });
+
+  elements.categoryBars.querySelectorAll("[data-category-toggle]").forEach((button) => {
+    const category = button.dataset.categoryToggle || "";
+    button.addEventListener("pointerenter", (event) => activateHover(category, event.pointerType));
+    button.addEventListener("pointerleave", () => clearHover(category));
+  });
+}
+
+function syncAnalysisVisualState(grouped, total) {
+  if (!grouped.length) return;
+
+  const hovered = grouped.find((item) => sameCategory(item.category, state.analysisHoveredCategory)) || null;
+  const selected = grouped.find((item) => sameCategory(item.category, state.activeAnalysisCategory)) || null;
+  const focus = hovered || selected || grouped[0];
+  const focusTotal = typeof total === "number" ? total : grouped.reduce((sum, item) => sum + item.total, 0);
+  const share = Math.round((focus.total / focusTotal) * 100);
+  const typeLabel = state.analysisType === "expense" ? "saídas" : "entradas";
+  const focusCategory = focus.category;
+
+  elements.topCategory.textContent = capitalize(focusCategory);
+  elements.topCategoryCopy.textContent = `${share}% das ${typeLabel} em ${periodLabel("analysis").toLowerCase()}. ${currency.format(focus.total)} no total.`;
+  elements.donutCenter.textContent = `${share}%`;
+
+  elements.categoryDonut.querySelectorAll("[data-category]").forEach((slice) => {
+    slice.classList.toggle("active", sameCategory(slice.dataset.category, focusCategory));
+  });
+
+  elements.categoryBars.querySelectorAll(".category-row").forEach((row) => {
+    const category = row.dataset.category || "";
+    const isSelected = sameCategory(category, state.activeAnalysisCategory);
+    const isHovered = sameCategory(category, state.analysisHoveredCategory);
+    row.classList.toggle("expanded", isSelected);
+    row.classList.toggle("is-hovered", isHovered);
+    row.classList.toggle("is-selected", isSelected);
+    const toggle = row.querySelector(".category-row-toggle");
+    if (toggle) toggle.setAttribute("aria-expanded", String(isSelected));
   });
 }
 
@@ -1672,9 +1796,12 @@ async function logout() {
   state.formType = "expense";
   state.analysisType = "expense";
   state.activeAnalysisCategory = "";
+  state.analysisHoveredCategory = "";
   state.pendingDeleteCategory = "";
   state.pendingDeleteGoal = "";
   state.pendingCloseCycle = false;
+  state.sectionSwitcherOpen = false;
+  clearTimeout(state.sectionSwitcherCloseTimer);
   state.authStatus = "guest";
   setAuthMode("guest");
   updateAuthShell();
@@ -1977,15 +2104,33 @@ function bindEvents() {
     button.addEventListener("click", () => setActiveTab(button.dataset.tab));
   });
 
+  if (elements.sectionSwitcher) {
+    elements.sectionSwitcher.addEventListener("click", (event) => {
+      event.preventDefault();
+      toggleSectionSwitcher();
+    });
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!state.sectionSwitcherOpen) return;
+    if (!elements.sectionSwitcherShell) return;
+    if (elements.sectionSwitcherShell.contains(event.target)) return;
+    closeSectionSwitcher();
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.sectionSwitcherOpen) {
+      closeSectionSwitcher();
+    }
+  });
+
   $$("[data-open-tab]").forEach((button) => {
     button.addEventListener("click", () => setActiveTab(button.dataset.openTab));
   });
 
   $$(".filter-pill").forEach((button) => {
     button.addEventListener("click", () => {
-      state.activeFilter = button.dataset.filter;
-      $$(".filter-pill").forEach((pill) => pill.classList.toggle("active", pill === button));
-      renderHistory();
+      setHistoryFilter(button.dataset.filter);
     });
   });
 
@@ -1993,9 +2138,21 @@ function bindEvents() {
     button.addEventListener("click", () => {
       state.analysisType = button.dataset.analysisType;
       state.activeAnalysisCategory = "";
+      state.analysisHoveredCategory = "";
       elements.analysisTypeButtons.forEach((item) => item.classList.toggle("active", item === button));
       renderAnalysis(getTotals());
     });
+  });
+
+  elements.categoryBars.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-category-toggle]");
+    if (!button || !elements.categoryBars.contains(button)) return;
+
+    const category = button.dataset.categoryToggle || "";
+    if (!category) return;
+    state.analysisHoveredCategory = "";
+    state.activeAnalysisCategory = sameCategory(state.activeAnalysisCategory, category) ? "" : category;
+    renderAnalysis(getTotals());
   });
 
   $("#open-form").addEventListener("click", () => openSheet());
@@ -2150,11 +2307,76 @@ function updateCategoryField() {
 
 function setActiveTab(tab) {
   state.activeTab = tab;
+  document.body.dataset.activeTab = tab;
+  if (tab !== "analysis") {
+    state.analysisHoveredCategory = "";
+  }
   $$(".nav-tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tab}`));
   const panel = $(`#tab-${tab}`);
   elements.screenTitle.textContent = panel.dataset.title;
   elements.screenPeriod.textContent = tab === "history" ? "Linha do tempo" : periodLabel(tab);
+  syncSectionSwitcher(tab);
+  closeSectionSwitcher();
+}
+
+function renderSectionSwitcherPanel() {
+  if (!elements.sectionSwitcherPanel) return;
+
+  elements.sectionSwitcherPanel.innerHTML = sectionSwitcherItems
+    .map((item) => `
+      <button class="section-switcher-option" type="button" data-mobile-tab="${item.tab}">
+        <strong>${item.label}</strong>
+        <small>${item.copy}</small>
+      </button>
+    `)
+    .join("");
+
+  elements.sectionSwitcherPanel.querySelectorAll("[data-mobile-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setActiveTab(button.dataset.mobileTab);
+    });
+  });
+}
+
+function syncSectionSwitcher(tab = state.activeTab) {
+  if (!elements.sectionSwitcher || !elements.sectionSwitcherPanel) return;
+
+  const current = sectionSwitcherItems.find((item) => item.tab === tab) || sectionSwitcherItems[0];
+  elements.sectionSwitcherLabel.textContent = current?.label || "Seção";
+  elements.sectionSwitcherCopy.textContent = current?.copy || periodLabel(tab);
+  elements.sectionSwitcher.setAttribute("aria-expanded", String(state.sectionSwitcherOpen));
+  elements.sectionSwitcherPanel.classList.toggle("open", state.sectionSwitcherOpen);
+  elements.sectionSwitcherPanel.setAttribute("aria-hidden", String(!state.sectionSwitcherOpen));
+  elements.sectionSwitcherPanel.querySelectorAll("[data-mobile-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mobileTab === tab);
+    button.setAttribute("aria-current", button.dataset.mobileTab === tab ? "page" : "false");
+  });
+}
+
+function openSectionSwitcher() {
+  if (!elements.sectionSwitcherPanel) return;
+  clearTimeout(state.sectionSwitcherCloseTimer);
+  elements.sectionSwitcherPanel.hidden = false;
+  state.sectionSwitcherOpen = true;
+  syncSectionSwitcher();
+}
+
+function closeSectionSwitcher() {
+  if (!elements.sectionSwitcherPanel) return;
+  clearTimeout(state.sectionSwitcherCloseTimer);
+  state.sectionSwitcherOpen = false;
+  syncSectionSwitcher();
+  state.sectionSwitcherCloseTimer = setTimeout(() => {
+    if (!state.sectionSwitcherOpen && elements.sectionSwitcherPanel) {
+      elements.sectionSwitcherPanel.hidden = true;
+    }
+  }, 220);
+}
+
+function toggleSectionSwitcher() {
+  if (state.sectionSwitcherOpen) closeSectionSwitcher();
+  else openSectionSwitcher();
 }
 
 function openSheet(movement = null) {
