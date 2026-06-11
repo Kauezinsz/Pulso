@@ -23,6 +23,84 @@ const defaultCategoriesByType = {
   expense: ["alimentação", "transporte", "moradia", "contas", "lazer", "saúde", "compras", "trabalho", "outros"],
 };
 
+const goalAccentThemes = {
+  cyan: {
+    label: "Ciano",
+    color: "#2ee7ff",
+    soft: "rgba(46, 231, 255, 0.18)",
+    faint: "rgba(46, 231, 255, 0.07)",
+    glow: "rgba(46, 231, 255, 0.2)",
+    border: "rgba(46, 231, 255, 0.28)",
+    progress: "linear-gradient(90deg, #2ee7ff, #e7fcff)",
+  },
+  green: {
+    label: "Verde",
+    color: "#5dffb1",
+    soft: "rgba(93, 255, 177, 0.18)",
+    faint: "rgba(93, 255, 177, 0.07)",
+    glow: "rgba(93, 255, 177, 0.2)",
+    border: "rgba(93, 255, 177, 0.28)",
+    progress: "linear-gradient(90deg, #5dffb1, #d5ffe7)",
+  },
+  purple: {
+    label: "Roxo",
+    color: "#b59dff",
+    soft: "rgba(181, 157, 255, 0.18)",
+    faint: "rgba(181, 157, 255, 0.07)",
+    glow: "rgba(181, 157, 255, 0.2)",
+    border: "rgba(181, 157, 255, 0.28)",
+    progress: "linear-gradient(90deg, #b59dff, #f0e8ff)",
+  },
+  pink: {
+    label: "Rosa",
+    color: "#ff8fd2",
+    soft: "rgba(255, 143, 210, 0.18)",
+    faint: "rgba(255, 143, 210, 0.07)",
+    glow: "rgba(255, 143, 210, 0.2)",
+    border: "rgba(255, 143, 210, 0.28)",
+    progress: "linear-gradient(90deg, #ff8fd2, #fff0f7)",
+  },
+  amber: {
+    label: "Âmbar",
+    color: "#ffd166",
+    soft: "rgba(255, 209, 102, 0.18)",
+    faint: "rgba(255, 209, 102, 0.07)",
+    glow: "rgba(255, 209, 102, 0.2)",
+    border: "rgba(255, 209, 102, 0.28)",
+    progress: "linear-gradient(90deg, #ffd166, #fff3cf)",
+  },
+  blue: {
+    label: "Azul",
+    color: "#7aa7ff",
+    soft: "rgba(122, 167, 255, 0.18)",
+    faint: "rgba(122, 167, 255, 0.07)",
+    glow: "rgba(122, 167, 255, 0.2)",
+    border: "rgba(122, 167, 255, 0.28)",
+    progress: "linear-gradient(90deg, #7aa7ff, #e5eeff)",
+  },
+  coral: {
+    label: "Coral",
+    color: "#ff8b72",
+    soft: "rgba(255, 139, 114, 0.18)",
+    faint: "rgba(255, 139, 114, 0.07)",
+    glow: "rgba(255, 139, 114, 0.2)",
+    border: "rgba(255, 139, 114, 0.28)",
+    progress: "linear-gradient(90deg, #ff8b72, #ffe7e1)",
+  },
+  neutral: {
+    label: "Neutro",
+    color: "#8aa1b8",
+    soft: "rgba(138, 161, 184, 0.18)",
+    faint: "rgba(138, 161, 184, 0.07)",
+    glow: "rgba(138, 161, 184, 0.15)",
+    border: "rgba(138, 161, 184, 0.24)",
+    progress: "linear-gradient(90deg, #8aa1b8, #dce6ef)",
+  },
+};
+
+const goalAccentOrder = ["cyan", "green", "purple", "pink", "amber", "blue", "coral", "neutral"];
+const defaultGoalAccent = "cyan";
+
 const demoMovements = [
   { id: crypto.randomUUID(), type: "income", amount: 5200, category: "salário", description: "Salário", date: offsetDate(-8) },
   { id: crypto.randomUUID(), type: "expense", amount: 42.9, category: "alimentação", description: "Café e almoço", date: offsetDate(-1) },
@@ -41,12 +119,16 @@ const state = {
   cycles: [],
   cycleDetail: null,
   goals: [],
+  commitments: [],
   movements: [],
   activeTab: "summary",
   activeFilter: "all",
   formType: "expense",
   selectedCategory: "",
   analysisHoveredCategory: "",
+  commitmentType: "payable",
+  pendingDeleteCommitment: "",
+  pendingLaunchCommitment: "",
   receiptDraft: {
     file: null,
     previewUrl: "",
@@ -68,6 +150,7 @@ const state = {
   pendingDeleteCategory: "",
   pendingDeleteGoal: "",
   pendingCloseCycle: false,
+  goalAccent: defaultGoalAccent,
   sectionSwitcherOpen: false,
   sectionSwitcherCloseTimer: null,
   authMode: "login",
@@ -119,6 +202,19 @@ const elements = {
   goalsFeedback: $("#goal-feedback"),
   goalList: $("#goal-list"),
   openGoalSheet: $("#open-goal-sheet"),
+  commitmentsHeroTitle: $("#commitments-hero-title"),
+  commitmentsHeroCopy: $("#commitments-hero-copy"),
+  commitmentsPendingPayable: $("#commitments-pending-payable"),
+  commitmentsPendingReceivable: $("#commitments-pending-receivable"),
+  commitmentsDoneTotal: $("#commitments-done-total"),
+  commitmentsCount: $("#commitments-count"),
+  commitmentsPendingCount: $("#commitments-pending-count"),
+  commitmentsDoneCount: $("#commitments-done-count"),
+  commitmentsFeedback: $("#commitment-feedback"),
+  commitmentBoard: $("#commitment-board"),
+  commitmentPendingList: $("#commitment-pending-list"),
+  commitmentDoneList: $("#commitment-done-list"),
+  openCommitmentSheet: $("#open-commitment-sheet"),
   topCategory: $("#top-category"),
   topCategoryCopy: $("#top-category-copy"),
   analysisPeriod: $("#analysis-period"),
@@ -189,6 +285,8 @@ const elements = {
   goalId: $("#goal-id"),
   goalName: $("#goal-name"),
   goalTarget: $("#goal-target"),
+  goalAccent: $("#goal-accent"),
+  goalAccentOptions: $("#goal-accent-options"),
   saveGoal: $("#save-goal"),
   goalAmountSheet: $("#goal-amount-sheet"),
   goalAmountForm: $("#goal-amount-form"),
@@ -199,8 +297,18 @@ const elements = {
   goalAmount: $("#goal-amount"),
   goalAmountNote: $("#goal-amount-note"),
   confirmGoalAmount: $("#confirm-goal-amount"),
+  commitmentSheet: $("#commitment-sheet"),
+  commitmentForm: $("#commitment-form"),
+  commitmentSheetTitle: $("#commitment-sheet-title"),
+  commitmentId: $("#commitment-id"),
+  commitmentDescription: $("#commitment-description"),
+  commitmentAmount: $("#commitment-amount"),
+  commitmentDueDate: $("#commitment-due-date"),
+  saveCommitment: $("#save-commitment"),
+  commitmentTypeButtons: $$("#commitment-sheet [data-commitment-type]"),
   sectionSwitcherShell: $("#section-switcher-shell"),
   sectionSwitcher: $("#section-switcher"),
+  sectionSwitcherMark: $("#section-switcher-mark"),
   sectionSwitcherLabel: $("#section-switcher-label"),
   sectionSwitcherCopy: $("#section-switcher-copy"),
   sectionSwitcherPanel: $("#section-switcher-panel"),
@@ -210,6 +318,7 @@ const sectionSwitcherItems = [
   { tab: "summary", label: "Resumo", copy: "Ciclo ativo" },
   { tab: "history", label: "Histórico", copy: "Linha do tempo" },
   { tab: "analysis", label: "Análise", copy: "Gastos e receitas" },
+  { tab: "commitments", label: "Contas", copy: "Planejamento do mês" },
   { tab: "insights", label: "Insights", copy: "Leituras do ciclo" },
   { tab: "goals", label: "Metas", copy: "Cofrinhos do ciclo" },
   { tab: "cycles", label: "Ciclos", copy: "Histórico fechado" },
@@ -220,6 +329,7 @@ init();
 function init() {
   bindViewportContext();
   bindEvents();
+  renderGoalAccentOptions(defaultGoalAccent);
   renderSectionSwitcherPanel();
   syncSectionSwitcher();
   window.addEventListener("pageshow", () => {
@@ -280,6 +390,7 @@ function syncViewportContext() {
 
 async function bootApp() {
   sanitizeUiState();
+  clearAuthMessage();
   setAuthMode("loading");
   updateAuthShell();
 
@@ -293,8 +404,10 @@ async function bootApp() {
     state.authStatus = "guest";
     setAuthMode("guest");
     updateAuthShell();
-    if (error?.code !== "unauthorized") {
+    if (error?.code !== "unauthorized" && error?.code !== "network_error" && error?.code !== "request_failed") {
       setAuthMessage(authErrorMessage(error));
+    } else {
+      clearAuthMessage();
     }
     return;
   }
@@ -318,9 +431,12 @@ function sanitizeUiState() {
   closeMigrationSheet();
   closeGoalSheet();
   closeGoalAmountSheet();
+  closeCommitmentSheet();
   closeCycleSheet();
   closeCycleDetailSheet();
   state.analysisHoveredCategory = "";
+  state.pendingDeleteCommitment = "";
+  state.pendingLaunchCommitment = "";
   state.sectionSwitcherOpen = false;
   clearTimeout(state.sectionSwitcherCloseTimer);
   syncSectionSwitcher();
@@ -332,7 +448,9 @@ function registerServiceWorker() {
   if (location.protocol === "file:") return;
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {
+    navigator.serviceWorker.register("./sw.js").then((registration) => {
+      registration.update().catch(() => {});
+    }).catch(() => {
       // O app continua funcionando normalmente sem cache offline.
     });
   });
@@ -362,24 +480,6 @@ function setAuthTab(tab) {
   elements.loginForm.classList.toggle("active", tab === "login");
   elements.registerForm.classList.toggle("active", tab === "register");
   elements.authMessage.textContent = "";
-}
-
-async function submitLogin(event) {
-  event.preventDefault();
-  try {
-    setAuthMessage("Entrando...");
-    await apiRequest("/auth/login", {
-      method: "POST",
-      body: {
-        email: elements.loginEmail.value,
-        password: elements.loginPassword.value,
-      },
-    });
-    await bootApp();
-    setAuthMessage("");
-  } catch (error) {
-    setAuthMessage(authErrorMessage(error));
-  }
 }
 
 function formatFileSize(bytes) {
@@ -1007,6 +1107,7 @@ function render(options = {}) {
   renderSummary(totals, options);
   renderHistory();
   renderAnalysis(totals);
+  renderCommitments(totals);
   renderInsights(totals);
   renderGoals(totals);
   renderCycles();
@@ -1619,6 +1720,7 @@ function periodLabel(tab) {
     summary: "Ciclo ativo",
     history: "Lançamentos do ciclo",
     analysis: "Ciclo ativo",
+    commitments: "Contas do mês",
     insights: "Leituras do ciclo",
     goals: "Cofrinhos do ciclo",
     cycles: "Histórico de ciclos",
@@ -1628,8 +1730,12 @@ function periodLabel(tab) {
 
 function formatDate(date) {
   const parsed = new Date(`${date}T12:00:00`);
-    if (Number.isNaN(parsed.getTime())) return "—";
+  if (Number.isNaN(parsed.getTime())) return "—";
   return dateFormatter.format(parsed).replace(".", "");
+}
+
+function formatOptionalDate(date) {
+  return date ? formatDate(date) : "Sem data";
 }
 
 function formatCycleTitle(cycle) {
@@ -1744,12 +1850,17 @@ function setAuthMessage(message) {
   elements.authMessage.textContent = message || "";
 }
 
+function clearAuthMessage() {
+  setAuthMessage("");
+}
+
 function authErrorMessage(error) {
   if (!error) return "Nao foi possivel continuar.";
   if (error.code === "email_in_use") return "Esse e-mail ja esta em uso.";
   if (error.code === "invalid_credentials") return "E-mail ou senha invalidos.";
   if (error.code === "unauthorized") return "Sua sessao expirou. Entre novamente.";
   if (error.code === "network_error") return "Não conseguimos conectar ao servidor.";
+  if (error.code === "insufficient_balance") return "Saldo insuficiente para concluir esta conta.";
   return error.message || "Nao foi possivel continuar.";
 }
 
@@ -1761,13 +1872,20 @@ function handleUnauthorizedError(error) {
 
 async function submitRegister(event) {
   event.preventDefault();
+  const email = elements.registerEmail.value.trim();
+  const password = elements.registerPassword.value;
+  if (!email || !password) {
+    clearAuthMessage();
+    return;
+  }
+
   try {
     setAuthMessage("Criando sua conta...");
     await apiRequest("/auth/register", {
       method: "POST",
       body: {
-        email: elements.registerEmail.value,
-        password: elements.registerPassword.value,
+        email,
+        password,
       },
     });
     await bootApp();
@@ -1789,6 +1907,7 @@ async function logout() {
   state.cycles = [];
   state.cycleDetail = null;
   state.goals = [];
+  state.commitments = [];
   state.movements = [];
   state.selectedCategory = "";
   state.activeTab = "summary";
@@ -1797,6 +1916,9 @@ async function logout() {
   state.analysisType = "expense";
   state.activeAnalysisCategory = "";
   state.analysisHoveredCategory = "";
+  state.commitmentType = "payable";
+  state.pendingDeleteCommitment = "";
+  state.pendingLaunchCommitment = "";
   state.pendingDeleteCategory = "";
   state.pendingDeleteGoal = "";
   state.pendingCloseCycle = false;
@@ -1819,13 +1941,20 @@ async function logout() {
 
 async function submitLogin(event) {
   event.preventDefault();
+  const email = elements.loginEmail.value.trim();
+  const password = elements.loginPassword.value;
+  if (!email || !password) {
+    clearAuthMessage();
+    return;
+  }
+
   try {
     setAuthMessage("Entrando...");
     await apiRequest("/auth/login", {
       method: "POST",
       body: {
-        email: elements.loginEmail.value,
-        password: elements.loginPassword.value,
+        email,
+        password,
       },
     });
     await bootApp();
@@ -1841,6 +1970,7 @@ async function loadUserData() {
   state.currentCycle = normalizeCyclePayload(bootstrap.currentCycle);
   state.cycles = normalizeCyclesPayload(bootstrap.cycles);
   state.goals = normalizeGoalsPayload(bootstrap.goals);
+  state.commitments = normalizeCommitmentsPayload(bootstrap.commitments);
   applyCategoryPayload(bootstrap.categories);
   state.movements = normalizeMovementsPayload(bootstrap.movements);
   state.cycleDetail = null;
@@ -1985,6 +2115,58 @@ function normalizeCyclesPayload(items) {
   return Array.isArray(items) ? items.map(normalizeCyclePayload).filter(Boolean) : [];
 }
 
+function normalizeGoalAccent(value, fallback = "") {
+  const key = String(value || "").trim().toLowerCase();
+  if (goalAccentThemes[key]) return key;
+  return fallback;
+}
+
+function getGoalAccentTheme(accent) {
+  const key = normalizeGoalAccent(accent, "neutral") || "neutral";
+  return goalAccentThemes[key] || goalAccentThemes.neutral;
+}
+
+function pickGoalAccentSeed(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  let hash = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
+  }
+  return goalAccentOrder[hash % goalAccentOrder.length] || defaultGoalAccent;
+}
+
+function resolveGoalAccent(goal) {
+  return normalizeGoalAccent(goal?.accent, "") || pickGoalAccentSeed(goal?.slug || goal?.name || goal?.id || defaultGoalAccent);
+}
+
+function renderGoalAccentOptions(selectedAccent = defaultGoalAccent) {
+  if (!elements.goalAccentOptions) return;
+  const selected = normalizeGoalAccent(selectedAccent, defaultGoalAccent) || defaultGoalAccent;
+  elements.goalAccentOptions.innerHTML = goalAccentOrder.map((key) => {
+    const theme = goalAccentThemes[key];
+    const active = key === selected;
+    return `<button class="goal-accent-option ${active ? "active" : ""}" type="button" data-goal-accent="${key}" aria-pressed="${active ? "true" : "false"}" style="--goal-accent:${theme.color};--goal-accent-soft:${theme.soft};--goal-accent-faint:${theme.faint};--goal-accent-glow:${theme.glow};--goal-accent-border:${theme.border};">
+      <span class="goal-accent-swatch" aria-hidden="true"></span>
+      <span class="goal-accent-label">${theme.label}</span>
+    </button>`;
+  }).join("");
+}
+
+function setGoalAccent(accent) {
+  const key = normalizeGoalAccent(accent, defaultGoalAccent) || defaultGoalAccent;
+  state.goalAccent = key;
+  if (elements.goalAccent) {
+    elements.goalAccent.value = key;
+  }
+  if (elements.goalAccentOptions) {
+    elements.goalAccentOptions.querySelectorAll(".goal-accent-option").forEach((button) => {
+      const active = button.dataset.goalAccent === key;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+}
+
 function normalizeGoalsPayload(items) {
   return Array.isArray(items)
     ? items.map((item) => ({
@@ -1992,12 +2174,48 @@ function normalizeGoalsPayload(items) {
         cycleId: item.cycleId,
         name: normalizeGoalName(item.name),
         slug: item.slug,
+        accent: normalizeGoalAccent(item.accent, ""),
         targetAmount: Number(item.targetAmount || 0),
         savedAmount: Number(item.savedAmount || 0),
         remainingAmount: Number(item.remainingAmount || 0),
         progress: Number(item.progress || 0),
       }))
     : [];
+}
+
+function normalizeCommitmentPayload(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    cycleId: item.cycleId,
+    type: item.type === "receivable" ? "receivable" : "payable",
+    description: String(item.description || "").trim(),
+    amount: Number(item.amount || 0),
+    status: item.status === "done" ? "done" : "pending",
+    dueDate: item.dueDate || item.due_date || "",
+    completedAt: item.completedAt || item.completed_at || null,
+    convertedMovementId: item.convertedMovementId || item.converted_movement_id || null,
+    convertedAt: item.convertedAt || item.converted_at || null,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+function normalizeCommitmentsPayload(items) {
+  return Array.isArray(items) ? items.map(normalizeCommitmentPayload).filter(Boolean) : [];
+}
+
+function applyCommitmentsResponse(result) {
+  if (!result || typeof result !== "object") return;
+  if (result.currentCycle) {
+    state.currentCycle = normalizeCyclePayload(result.currentCycle);
+  }
+  if (Array.isArray(result.commitments)) {
+    state.commitments = normalizeCommitmentsPayload(result.commitments);
+  }
+  if (Array.isArray(result.movements)) {
+    state.movements = normalizeMovementsPayload(result.movements);
+  }
 }
 
 function normalizeMovementsPayload(items) {
@@ -2092,6 +2310,11 @@ function bindEvents() {
     button.addEventListener("click", () => setAuthTab(button.dataset.authTab));
   });
 
+  [elements.loginEmail, elements.loginPassword, elements.registerEmail, elements.registerPassword].forEach((input) => {
+    input?.addEventListener("input", clearAuthMessage);
+    input?.addEventListener("focus", clearAuthMessage);
+  });
+
   elements.loginForm.addEventListener("submit", (event) => {
     void submitLogin(event);
   });
@@ -2155,6 +2378,43 @@ function bindEvents() {
     renderAnalysis(getTotals());
   });
 
+  if (elements.commitmentBoard) {
+    elements.commitmentBoard.addEventListener("click", (event) => {
+      const editButton = event.target.closest("[data-commitment-edit]");
+      if (editButton) {
+        const commitment = state.commitments.find((item) => item.id === editButton.dataset.commitmentEdit);
+        if (commitment) openCommitmentSheet(commitment);
+        return;
+      }
+
+      const toggleButton = event.target.closest("[data-commitment-toggle]");
+      if (toggleButton) {
+        const commitment = state.commitments.find((item) => item.id === toggleButton.dataset.commitmentToggle);
+        if (commitment) {
+          void toggleCommitmentStatus(commitment);
+        }
+        return;
+      }
+
+      const launchButton = event.target.closest("[data-commitment-launch]");
+      if (launchButton) {
+        const commitment = state.commitments.find((item) => item.id === launchButton.dataset.commitmentLaunch);
+        if (commitment) {
+          requestCommitmentLaunch(commitment);
+        }
+        return;
+      }
+
+      const deleteButton = event.target.closest("[data-commitment-delete]");
+      if (deleteButton) {
+        const commitment = state.commitments.find((item) => item.id === deleteButton.dataset.commitmentDelete);
+        if (commitment) {
+          requestCommitmentDelete(commitment);
+        }
+      }
+    });
+  }
+
   $("#open-form").addEventListener("click", () => openSheet());
   elements.categorySelect.addEventListener("click", openCategorySheet);
   elements.receiptOpen.addEventListener("click", openCurrentReceipt);
@@ -2191,6 +2451,10 @@ function bindEvents() {
     element.addEventListener("click", closeGoalAmountSheet);
   });
 
+  $$("[data-close-commitment-sheet]").forEach((element) => {
+    element.addEventListener("click", closeCommitmentSheet);
+  });
+
   $$("[data-close-cycle-sheet]").forEach((element) => {
     element.addEventListener("click", closeCycleSheet);
   });
@@ -2225,6 +2489,14 @@ function bindEvents() {
     elements.goalTarget.select();
   });
 
+  if (elements.goalAccentOptions) {
+    elements.goalAccentOptions.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-goal-accent]");
+      if (!button) return;
+      setGoalAccent(button.dataset.goalAccent);
+    });
+  }
+
   elements.goalAmount.addEventListener("input", () => {
     elements.goalAmount.value = sanitizeMoneyInput(elements.goalAmount.value);
   });
@@ -2239,8 +2511,26 @@ function bindEvents() {
   elements.form.addEventListener("submit", saveMovement);
   elements.goalForm.addEventListener("submit", saveGoal);
   elements.goalAmountForm.addEventListener("submit", submitGoalAmount);
+  elements.commitmentForm.addEventListener("submit", saveCommitment);
   elements.saveCategory.addEventListener("click", () => {
     void saveNewCategory();
+  });
+  elements.openCommitmentSheet.addEventListener("click", () => openCommitmentSheet());
+  elements.commitmentTypeButtons.forEach((button) => {
+    button.addEventListener("click", () => setCommitmentType(button.dataset.commitmentType));
+  });
+  elements.commitmentDescription.addEventListener("input", () => {
+    elements.commitmentDescription.value = elements.commitmentDescription.value.replace(/\s+/g, " ").trimStart();
+  });
+  elements.commitmentAmount.addEventListener("input", () => {
+    elements.commitmentAmount.value = sanitizeMoneyInput(elements.commitmentAmount.value);
+  });
+  elements.commitmentAmount.addEventListener("blur", () => {
+    const amount = parseMoney(elements.commitmentAmount.value);
+    elements.commitmentAmount.value = amount ? formatMoneyInput(amount) : "";
+  });
+  elements.commitmentAmount.addEventListener("focus", () => {
+    elements.commitmentAmount.select();
   });
   elements.newCategoryName.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -2326,8 +2616,11 @@ function renderSectionSwitcherPanel() {
   elements.sectionSwitcherPanel.innerHTML = sectionSwitcherItems
     .map((item) => `
       <button class="section-switcher-option" type="button" data-mobile-tab="${item.tab}">
-        <strong>${item.label}</strong>
-        <small>${item.copy}</small>
+        <span class="section-switcher-option-mark" aria-hidden="true">${getSectionSwitcherIcon(item.tab)}</span>
+        <span class="section-switcher-option-copy">
+          <strong>${item.label}</strong>
+          <small>${item.copy}</small>
+        </span>
       </button>
     `)
     .join("");
@@ -2345,6 +2638,9 @@ function syncSectionSwitcher(tab = state.activeTab) {
   const current = sectionSwitcherItems.find((item) => item.tab === tab) || sectionSwitcherItems[0];
   elements.sectionSwitcherLabel.textContent = current?.label || "Seção";
   elements.sectionSwitcherCopy.textContent = current?.copy || periodLabel(tab);
+  if (elements.sectionSwitcherMark) {
+    elements.sectionSwitcherMark.innerHTML = getSectionSwitcherIcon(tab);
+  }
   elements.sectionSwitcher.setAttribute("aria-expanded", String(state.sectionSwitcherOpen));
   elements.sectionSwitcherPanel.classList.toggle("open", state.sectionSwitcherOpen);
   elements.sectionSwitcherPanel.setAttribute("aria-hidden", String(!state.sectionSwitcherOpen));
@@ -2352,6 +2648,71 @@ function syncSectionSwitcher(tab = state.activeTab) {
     button.classList.toggle("active", button.dataset.mobileTab === tab);
     button.setAttribute("aria-current", button.dataset.mobileTab === tab ? "page" : "false");
   });
+}
+
+function getSectionSwitcherIcon(tab) {
+  const icons = {
+    summary: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 11.2 12 5l8 6.2" />
+        <path d="M6.5 10.6V19h11V10.6" />
+        <path d="M10 19v-4h4v4" />
+      </svg>`,
+    history: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 6h12" />
+        <path d="M8 12h12" />
+        <path d="M8 18h12" />
+        <path d="M4 6h.01" />
+        <path d="M4 12h.01" />
+        <path d="M4 18h.01" />
+      </svg>`,
+    analysis: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 19V5" />
+        <path d="M4 19h16" />
+        <path d="M8 16v-4" />
+        <path d="M12 16V8" />
+        <path d="M16 16v-6" />
+      </svg>`,
+    commitments: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 6h11" />
+        <path d="M8 12h11" />
+        <path d="M8 18h11" />
+        <path d="M4 6h.01" />
+        <path d="M4 12h.01" />
+        <path d="M4 18h.01" />
+      </svg>`,
+    insights: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v3" />
+        <path d="M18.4 5.6 16.3 7.7" />
+        <path d="M21 12h-3" />
+        <path d="M6 12H3" />
+        <path d="M7.7 7.7 5.6 5.6" />
+        <path d="M9 18h6" />
+        <path d="M10 21h4" />
+        <path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" />
+      </svg>`,
+    goals: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2v3" />
+        <path d="M12 19v3" />
+        <path d="M4.9 4.9 7 7" />
+        <path d="M17 17l2.1 2.1" />
+        <path d="M2 12h3" />
+        <path d="M19 12h3" />
+        <circle cx="12" cy="12" r="5" />
+      </svg>`,
+    cycles: `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v6h6" />
+        <path d="M12 8v5l3 2" />
+      </svg>`,
+  };
+  return icons[tab] || icons.summary;
 }
 
 function openSectionSwitcher() {
@@ -2448,6 +2809,7 @@ function openGoalSheet(goal = null) {
   elements.goalId.value = "";
   elements.goalSheetTitle.textContent = "Nova meta";
   elements.saveGoal.textContent = "Salvar meta";
+  setGoalAccent(defaultGoalAccent);
 
   if (goal) {
     elements.goalId.value = goal.id;
@@ -2455,6 +2817,7 @@ function openGoalSheet(goal = null) {
     elements.saveGoal.textContent = "Salvar alterações";
     elements.goalName.value = goal.name;
     elements.goalTarget.value = formatMoneyInput(goal.targetAmount);
+    setGoalAccent(goal.accent || "neutral");
   }
 
   elements.goalSheet.classList.add("open");
@@ -2501,12 +2864,245 @@ function closeGoalAmountSheet() {
   elements.goalAmountSheet.setAttribute("aria-hidden", "true");
 }
 
+function openCommitmentSheet(commitment = null) {
+  closeSheet();
+  closeCategorySheet();
+  closeGoalSheet();
+  closeGoalAmountSheet();
+  closeCycleSheet();
+  closeCycleDetailSheet();
+  state.pendingDeleteCommitment = "";
+  state.pendingLaunchCommitment = "";
+  if (elements.commitmentsFeedback) {
+    elements.commitmentsFeedback.textContent = "";
+    elements.commitmentsFeedback.classList.remove("show");
+  }
+  elements.commitmentForm.reset();
+  elements.commitmentId.value = "";
+  elements.commitmentSheetTitle.textContent = "Novo compromisso";
+  elements.saveCommitment.textContent = "Salvar compromisso";
+  setCommitmentType(commitment?.type || "payable");
+
+  if (commitment) {
+    elements.commitmentId.value = commitment.id;
+    elements.commitmentSheetTitle.textContent = "Editar compromisso";
+    elements.saveCommitment.textContent = "Salvar alterações";
+    elements.commitmentDescription.value = commitment.description;
+    elements.commitmentAmount.value = formatMoneyInput(commitment.amount);
+    elements.commitmentDueDate.value = commitment.dueDate || "";
+    setCommitmentType(commitment.type);
+  } else {
+    elements.commitmentAmount.value = "";
+    elements.commitmentDescription.value = "";
+    elements.commitmentDueDate.value = "";
+  }
+
+  elements.commitmentSheet.classList.add("open");
+  elements.commitmentSheet.setAttribute("aria-hidden", "false");
+  setTimeout(() => elements.commitmentDescription.focus(), 120);
+}
+
+function closeCommitmentSheet() {
+  elements.commitmentSheet.classList.remove("open");
+  elements.commitmentSheet.setAttribute("aria-hidden", "true");
+}
+
+function setCommitmentType(type) {
+  state.commitmentType = type === "receivable" ? "receivable" : "payable";
+  elements.commitmentTypeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.commitmentType === state.commitmentType);
+  });
+}
+
+function showCommitmentFeedback(message) {
+  if (!elements.commitmentsFeedback) return;
+  elements.commitmentsFeedback.textContent = message;
+  elements.commitmentsFeedback.classList.remove("show");
+  requestAnimationFrame(() => elements.commitmentsFeedback.classList.add("show"));
+}
+
+async function saveCommitment(event) {
+  event.preventDefault();
+
+  const commitmentId = elements.commitmentId.value.trim();
+  const description = String(elements.commitmentDescription.value || "").trim().replace(/\s+/g, " ");
+  const amount = parseMoney(elements.commitmentAmount.value);
+  const dueDate = String(elements.commitmentDueDate.value || "").trim();
+
+  if (!description || !Number.isFinite(amount) || amount <= 0) {
+    showCommitmentFeedback("Informe uma descrição e um valor válidos.");
+    return;
+  }
+
+  if (dueDate && Number.isNaN(new Date(`${dueDate}T12:00:00`).getTime())) {
+    showCommitmentFeedback("Escolha uma data válida.");
+    return;
+  }
+
+  const payload = {
+    type: state.commitmentType,
+    description,
+    amount,
+    dueDate: dueDate || null,
+  };
+
+  try {
+    if (commitmentId) {
+      const result = await apiRequest(`/api/commitments/${encodeURIComponent(commitmentId)}`, {
+        method: "PUT",
+        body: payload,
+      });
+      applyCommitmentsResponse(result);
+    } else {
+      const result = await apiRequest("/api/commitments", {
+        method: "POST",
+        body: payload,
+      });
+      applyCommitmentsResponse(result);
+    }
+
+    state.pendingDeleteCommitment = "";
+    closeCommitmentSheet();
+    render({ pulse: true });
+    showToast(commitmentId ? "Compromisso atualizado" : "Compromisso criado", "success");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showCommitmentFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+async function toggleCommitmentStatus(commitment) {
+  if (!commitment) return;
+
+  try {
+    const endpoint = commitment.status === "done" ? "reopen" : "complete";
+    const result = await apiRequest(`/api/commitments/${encodeURIComponent(commitment.id)}/${endpoint}`, {
+      method: "POST",
+    });
+    applyCommitmentsResponse(result);
+    state.pendingDeleteCommitment = "";
+    state.pendingLaunchCommitment = "";
+    render({ pulse: true });
+    if (commitment.status === "done") {
+      showCommitmentFeedback("Conta reaberta. O lançamento automático foi revertido.");
+      showToast("Conta reaberta e lançamento revertido", "neutral");
+      return;
+    }
+
+    const impactMessage = commitment.type === "receivable"
+      ? "Conta concluída e valor adicionado ao saldo."
+      : "Conta concluída e valor descontado do saldo.";
+    showCommitmentFeedback(impactMessage);
+    showToast(result?.created === false ? "Conta já estava lançada" : impactMessage, "success");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showCommitmentFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+function requestCommitmentDelete(commitment) {
+  if (!commitment) return;
+
+  if (state.pendingDeleteCommitment === commitment.id) {
+    void deleteCommitment(commitment.id);
+    return;
+  }
+
+  state.pendingDeleteCommitment = commitment.id;
+  state.pendingLaunchCommitment = "";
+  showCommitmentFeedback(commitment.convertedMovementId
+    ? "Toque novamente em Excluir para confirmar. O lançamento já criado no histórico continua intacto."
+    : "Toque novamente em Excluir para confirmar.");
+  showToast("Confirme a exclusão", "neutral");
+
+  clearTimeout(requestCommitmentDelete.timeout);
+  requestCommitmentDelete.timeout = setTimeout(() => {
+    if (state.pendingDeleteCommitment === commitment.id) {
+      state.pendingDeleteCommitment = "";
+      if (elements.commitmentsFeedback?.textContent) {
+        elements.commitmentsFeedback.textContent = "";
+        elements.commitmentsFeedback.classList.remove("show");
+      }
+      renderCommitments();
+    }
+  }, 4200);
+}
+
+function requestCommitmentLaunch(commitment) {
+  if (!commitment || commitment.convertedMovementId) return;
+
+  if (state.pendingLaunchCommitment === commitment.id) {
+    void launchCommitmentToHistory(commitment);
+    return;
+  }
+
+  state.pendingLaunchCommitment = commitment.id;
+  state.pendingDeleteCommitment = "";
+  showCommitmentFeedback("Toque novamente em Lançar no histórico para confirmar. Isso cria a movimentação real uma única vez.");
+  showToast("Confirme o lançamento", "neutral");
+
+  clearTimeout(requestCommitmentLaunch.timeout);
+  requestCommitmentLaunch.timeout = setTimeout(() => {
+    if (state.pendingLaunchCommitment === commitment.id) {
+      state.pendingLaunchCommitment = "";
+      if (elements.commitmentsFeedback?.textContent) {
+        elements.commitmentsFeedback.textContent = "";
+        elements.commitmentsFeedback.classList.remove("show");
+      }
+      renderCommitments();
+    }
+  }, 4200);
+}
+
+async function deleteCommitment(commitmentId) {
+  try {
+    const result = await apiRequest(`/api/commitments/${encodeURIComponent(commitmentId)}`, { method: "DELETE" });
+    applyCommitmentsResponse(result);
+    state.pendingDeleteCommitment = "";
+    render({ pulse: true });
+    showToast("Compromisso removido", "neutral");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    state.pendingDeleteCommitment = "";
+    renderCommitments();
+    showCommitmentFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
+async function launchCommitmentToHistory(commitment) {
+  if (!commitment) return;
+
+  try {
+    const result = await apiRequest(`/api/commitments/${encodeURIComponent(commitment.id)}/convert-to-movement`, {
+      method: "POST",
+    });
+    applyCommitmentsResponse(result);
+    state.pendingDeleteCommitment = "";
+    state.pendingLaunchCommitment = "";
+    render({ pulse: true });
+    const impactMessage = commitment.type === "receivable"
+      ? "Conta concluída e valor adicionado ao saldo."
+      : "Conta concluída e valor descontado do saldo.";
+    showCommitmentFeedback(impactMessage);
+    showToast(result?.created === false ? "Conta já estava lançada" : impactMessage, "success");
+  } catch (error) {
+    if (handleUnauthorizedError(error)) return;
+    showCommitmentFeedback(authErrorMessage(error));
+    showToast(authErrorMessage(error), "neutral");
+  }
+}
+
 async function saveGoal(event) {
   event.preventDefault();
   const goalId = elements.goalId.value.trim();
   const payload = {
     name: normalizeGoalName(elements.goalName.value),
     targetAmount: parseMoney(elements.goalTarget.value),
+    accent: normalizeGoalAccent(state.goalAccent || elements.goalAccent?.value, defaultGoalAccent) || defaultGoalAccent,
+    theme: normalizeGoalAccent(state.goalAccent || elements.goalAccent?.value, defaultGoalAccent) || defaultGoalAccent,
   };
 
   if (!payload.name || payload.targetAmount <= 0) {
@@ -2630,6 +3226,228 @@ function showGoalFeedback(message) {
   requestAnimationFrame(() => elements.goalsFeedback.classList.add("show"));
 }
 
+function getCommitmentTotals() {
+  return state.commitments.reduce(
+    (totals, commitment) => {
+      const amount = Number(commitment.amount || 0);
+      if (commitment.status === "done") {
+        totals.doneTotal += amount;
+        totals.doneCount += 1;
+      } else {
+        totals.pendingCount += 1;
+        if (commitment.type === "payable") {
+          totals.pendingPayable += amount;
+        } else {
+          totals.pendingReceivable += amount;
+        }
+      }
+      return totals;
+    },
+    {
+      pendingPayable: 0,
+      pendingReceivable: 0,
+      doneTotal: 0,
+      pendingCount: 0,
+      doneCount: 0,
+    },
+  );
+}
+
+function sortCommitments(items) {
+  return [...items].sort((a, b) => {
+    const aPriority = a.status === "pending" ? 0 : 1;
+    const bPriority = b.status === "pending" ? 0 : 1;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    const aDate = a.dueDate || a.completedAt || a.createdAt || "";
+    const bDate = b.dueDate || b.completedAt || b.createdAt || "";
+    if (aDate !== bDate) return aDate.localeCompare(bDate);
+    return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+  });
+}
+
+function renderCommitments() {
+  if (!elements.commitmentPendingList || !elements.commitmentDoneList) return;
+
+  const summary = getCommitmentTotals();
+  const pending = sortCommitments(state.commitments.filter((item) => item.status === "pending"));
+  const done = sortCommitments(state.commitments.filter((item) => item.status === "done"));
+  const totalCount = state.commitments.length;
+  const pendingBuckets = groupPendingCommitments(pending);
+
+  if (elements.commitmentsHeroTitle) {
+    elements.commitmentsHeroTitle.textContent = totalCount
+      ? "O planejamento do mês já tomou forma"
+      : "Sem itens planejados por enquanto";
+  }
+
+  if (elements.commitmentsHeroCopy) {
+    elements.commitmentsHeroCopy.textContent = totalCount
+      ? `Você acompanha ${pending.length} item${pending.length === 1 ? "" : "s"} planejado${pending.length === 1 ? "" : "s"} e ${done.length} realizado${done.length === 1 ? "" : "s"} neste ciclo. Planejado não mexe no saldo nem no histórico até virar movimento real.`
+      : "Registre o que precisa pagar ou receber e acompanhe o mês como um planejamento financeiro claro.";
+  }
+
+  if (elements.commitmentsPendingPayable) {
+    elements.commitmentsPendingPayable.textContent = currency.format(summary.pendingPayable);
+  }
+  if (elements.commitmentsPendingReceivable) {
+    elements.commitmentsPendingReceivable.textContent = currency.format(summary.pendingReceivable);
+  }
+  if (elements.commitmentsDoneTotal) {
+    elements.commitmentsDoneTotal.textContent = currency.format(summary.doneTotal);
+  }
+  if (elements.commitmentsCount) {
+    elements.commitmentsCount.textContent = `${totalCount} item${totalCount === 1 ? "" : "s"}`;
+  }
+  if (elements.commitmentsPendingCount) {
+    elements.commitmentsPendingCount.textContent = `${pending.length} planejado${pending.length === 1 ? "" : "s"}`;
+  }
+  if (elements.commitmentsDoneCount) {
+    elements.commitmentsDoneCount.textContent = `${done.length} realizado${done.length === 1 ? "" : "s"}`;
+  }
+
+  if (!state.pendingDeleteCommitment && !state.pendingLaunchCommitment && elements.commitmentsFeedback) {
+    elements.commitmentsFeedback.textContent = "";
+    elements.commitmentsFeedback.classList.remove("show");
+  }
+
+  elements.commitmentPendingList.innerHTML = pending.length
+    ? renderCommitmentSections(pendingBuckets)
+    : renderEmptyState("Nada pendente", "Os compromissos a pagar e a receber aparecem aqui antes de virar movimento.");
+  elements.commitmentDoneList.innerHTML = done.length
+    ? done.map((item) => renderCommitmentCard(item)).join("")
+    : renderEmptyState("Nada concluído", "Quando você conclui um compromisso, ele muda de lado e pode ser lançado no histórico.");
+}
+
+function renderCommitmentSections(buckets) {
+  const sections = [
+    { key: "overdue", title: "Atrasados", copy: "Já passaram do vencimento." },
+    { key: "today", title: "Vencendo hoje", copy: "Itens para resolver ainda hoje." },
+    { key: "week", title: "Próximos 7 dias", copy: "Planejamento de curto prazo." },
+    { key: "later", title: "Mais à frente", copy: "Compromissos já com data definida." },
+    { key: "nodate", title: "Sem vencimento", copy: "Planejado, mas ainda sem data." },
+  ];
+
+  return sections
+    .map((section) => {
+      const items = buckets[section.key] || [];
+      if (!items.length) return "";
+      return `<section class="commitment-group">
+        <header class="commitment-group-header">
+          <div>
+            <strong>${section.title}</strong>
+            <p>${section.copy}</p>
+          </div>
+          <span>${items.length} item${items.length === 1 ? "" : "s"}</span>
+        </header>
+        <div class="commitment-group-list">
+          ${items.map((item) => renderCommitmentCard(item)).join("")}
+        </div>
+      </section>`;
+    })
+    .join("");
+}
+
+function renderCommitmentCard(commitment) {
+  const isPending = commitment.status === "pending";
+  const isLaunched = Boolean(commitment.convertedMovementId);
+  const typeLabel = commitment.type === "receivable" ? "A receber" : "A pagar";
+  const statusLabel = isPending ? "Planejado" : "Realizado";
+  const dueState = getCommitmentDueState(commitment);
+  const pendingDelete = state.pendingDeleteCommitment === commitment.id;
+  const pendingLaunch = state.pendingLaunchCommitment === commitment.id;
+  const canLaunch = commitment.status === "done" && !isLaunched;
+  const launchLabel = pendingLaunch ? "Confirmar lançamento" : "Lançar no histórico";
+  const dueBadge = dueState.label || "Sem vencimento";
+  const dueClass = dueState.className ? ` ${dueState.className}` : "";
+
+  return `<article class="commitment-card ${commitment.type} ${commitment.status} ${isLaunched ? "launched" : ""} ${pendingDelete ? "pending-delete" : ""}${dueClass}">
+    <div class="commitment-head">
+      <div class="commitment-copy">
+        <div class="commitment-badges">
+          <span class="commitment-badge type">${typeLabel}</span>
+          <span class="commitment-badge status ${isPending ? "pending" : "done"}">${statusLabel}</span>
+          <span class="commitment-badge due ${dueState.badgeTone}">${dueBadge}</span>
+          ${isLaunched ? `<span class="commitment-badge launch">Lançado</span>` : ""}
+        </div>
+        <strong>${escapeHtml(commitment.description)}</strong>
+        <p>${commitment.type === "receivable" ? "Valor a entrar" : "Valor a sair"} ${currency.format(commitment.amount)}${commitment.dueDate ? ` · ${formatOptionalDate(commitment.dueDate)}` : " · Sem vencimento"}</p>
+      </div>
+      <div class="commitment-value">
+        <strong>${currency.format(commitment.amount)}</strong>
+        <span>${commitment.type === "receivable" ? "Entrada prevista" : "Saída prevista"}</span>
+      </div>
+    </div>
+    <div class="commitment-meta">
+      <span>${commitment.dueDate ? `Prazo ${formatOptionalDate(commitment.dueDate)}` : "Sem data definida"}</span>
+      <span>${isLaunched ? "Já virou movimento real" : "Ainda não entrou no histórico"}</span>
+    </div>
+    <div class="commitment-actions">
+      <button class="secondary-action compact commitment-action" type="button" data-commitment-edit="${commitment.id}">Editar</button>
+      <button class="secondary-action compact commitment-action" type="button" data-commitment-toggle="${commitment.id}">${isPending ? "Concluir e lançar" : "Reabrir"}</button>
+      ${canLaunch ? `<button class="secondary-action compact commitment-action ${pendingLaunch ? "pending-confirm" : ""}" type="button" data-commitment-launch="${commitment.id}">${launchLabel}</button>` : ""}
+    </div>
+    <div class="commitment-meta-actions">
+      <button class="text-button ${pendingDelete ? "pending" : ""}" type="button" data-commitment-delete="${commitment.id}">${pendingDelete ? "Confirmar" : "Excluir"}</button>
+    </div>
+  </article>`;
+}
+
+function getCommitmentDueState(commitment) {
+  if (!commitment?.dueDate) {
+    return { label: "Sem vencimento", className: "no-date", badgeTone: "muted" };
+  }
+
+  const due = new Date(`${commitment.dueDate}T12:00:00`);
+  if (Number.isNaN(due.getTime())) {
+    return { label: "Data inválida", className: "no-date", badgeTone: "muted" };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueDay = new Date(due);
+  dueDay.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((dueDay.getTime() - today.getTime()) / 86400000);
+
+  if (diffDays < 0) {
+    return { label: "Atrasado", className: "overdue", badgeTone: "danger" };
+  }
+  if (diffDays === 0) {
+    return { label: "Vence hoje", className: "due-today", badgeTone: "warning" };
+  }
+  if (diffDays <= 7) {
+    return { label: `Em ${diffDays} dia${diffDays === 1 ? "" : "s"}`, className: "due-soon", badgeTone: "info" };
+  }
+  return { label: formatOptionalDate(commitment.dueDate), className: "future", badgeTone: "muted" };
+}
+
+function groupPendingCommitments(items) {
+  const buckets = {
+    overdue: [],
+    today: [],
+    week: [],
+    later: [],
+    nodate: [],
+  };
+
+  [...items]
+    .sort((a, b) => {
+      const aDate = a.dueDate || "9999-12-31";
+      const bDate = b.dueDate || "9999-12-31";
+      if (aDate !== bDate) return aDate.localeCompare(bDate);
+      return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+    })
+    .forEach((commitment) => {
+      const stateInfo = getCommitmentDueState(commitment);
+      if (stateInfo.className === "overdue") buckets.overdue.push(commitment);
+      else if (stateInfo.className === "due-today") buckets.today.push(commitment);
+      else if (stateInfo.className === "due-soon") buckets.week.push(commitment);
+      else if (stateInfo.className === "future") buckets.later.push(commitment);
+      else buckets.nodate.push(commitment);
+    });
+
+  return buckets;
+}
+
 function renderGoals(totals) {
   const reserved = getGoalSavedTotal();
   const available = getAvailableBalance(totals, reserved);
@@ -2668,11 +3486,13 @@ function renderGoalCard(goal, availableBalance) {
   const fill = Math.min(progress, 100);
   const complete = goal.savedAmount >= goal.targetAmount;
   const pending = state.pendingDeleteGoal === goal.id;
+  const accentKey = resolveGoalAccent(goal);
+  const accent = getGoalAccentTheme(accentKey);
 
-  return `<article class="goal-card ${complete ? "complete" : ""} ${pending ? "pending-delete" : ""}">
+  return `<article class="goal-card ${complete ? "complete" : ""} ${pending ? "pending-delete" : ""}" data-goal-accent="${accentKey}" style="--goal-accent:${accent.color};--goal-accent-soft:${accent.soft};--goal-accent-faint:${accent.faint};--goal-accent-glow:${accent.glow};--goal-accent-border:${accent.border};--goal-accent-progress:${accent.progress};">
     <div class="goal-head">
       <div class="goal-copy">
-        <span class="mini-label">Meta</span>
+        <span class="mini-label goal-accent-pill">Meta</span>
         <strong>${escapeHtml(capitalize(goal.name))}</strong>
         <p>Guardado ${currency.format(goal.savedAmount)} · Alvo ${currency.format(goal.targetAmount)}</p>
       </div>

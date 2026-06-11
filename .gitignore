@@ -39,6 +39,3 @@ Desktop.ini
 
 # Database directories/files
 data/
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal

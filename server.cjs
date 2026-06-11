@@ -110,6 +110,7 @@ db.exec(`
     cycle_id TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     slug TEXT NOT NULL,
+    accent TEXT,
     target_amount REAL NOT NULL,
     saved_amount REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -117,12 +118,30 @@ db.exec(`
     UNIQUE(user_id, cycle_id, slug)
   );
 
+  CREATE TABLE IF NOT EXISTS commitments (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cycle_id TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK(type IN ('payable', 'receivable')),
+    description TEXT NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'done')),
+    due_date TEXT,
+    completed_at TEXT,
+    converted_movement_id TEXT REFERENCES movements(id) ON DELETE SET NULL,
+    converted_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE UNIQUE INDEX IF NOT EXISTS idx_cycles_one_active_per_user ON cycles(user_id) WHERE status = 'active';
   CREATE INDEX IF NOT EXISTS idx_goals_cycle_lookup ON goals(user_id, cycle_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_commitments_cycle_lookup ON commitments(user_id, cycle_id, status, due_date, created_at DESC);
 `);
 
 ensureMovementCycleColumn();
 ensureMovementReceiptColumns();
+ensureGoalAccentColumn();
 
 const statements = {
   insertUser: db.prepare(`
@@ -234,6 +253,7 @@ const statements = {
       goals.cycle_id AS cycleId,
       goals.name,
       goals.slug,
+      goals.accent,
       goals.target_amount AS targetAmount,
       goals.saved_amount AS savedAmount,
       goals.created_at AS createdAt,
@@ -242,6 +262,68 @@ const statements = {
     WHERE goals.user_id = ? AND goals.cycle_id = ?
     ORDER BY goals.created_at DESC
   `),
+  listCommitmentsByCycle: db.prepare(`
+    SELECT
+      commitments.id,
+      commitments.user_id AS userId,
+      commitments.cycle_id AS cycleId,
+      commitments.type,
+      commitments.description,
+      commitments.amount,
+      commitments.status,
+      commitments.due_date AS dueDate,
+      commitments.completed_at AS completedAt,
+      commitments.converted_movement_id AS convertedMovementId,
+      commitments.converted_at AS convertedAt,
+      commitments.created_at AS createdAt,
+      commitments.updated_at AS updatedAt
+    FROM commitments
+    WHERE commitments.user_id = ? AND commitments.cycle_id = ?
+    ORDER BY CASE commitments.status WHEN 'pending' THEN 0 ELSE 1 END, COALESCE(commitments.due_date, commitments.created_at) ASC, commitments.created_at ASC
+  `),
+  findCommitmentById: db.prepare(`
+    SELECT
+      commitments.id,
+      commitments.user_id AS userId,
+      commitments.cycle_id AS cycleId,
+      commitments.type,
+      commitments.description,
+      commitments.amount,
+      commitments.status,
+      commitments.due_date AS dueDate,
+      commitments.completed_at AS completedAt,
+      commitments.converted_movement_id AS convertedMovementId,
+      commitments.converted_at AS convertedAt,
+      commitments.created_at AS createdAt,
+      commitments.updated_at AS updatedAt
+    FROM commitments
+    WHERE commitments.id = ? AND commitments.user_id = ? AND commitments.cycle_id = ?
+    LIMIT 1
+  `),
+  insertCommitment: db.prepare(`
+    INSERT INTO commitments (
+      id, user_id, cycle_id, type, description, amount, status, due_date, completed_at, converted_movement_id, converted_at, created_at, updated_at
+    )
+    VALUES (
+      @id, @userId, @cycleId, @type, @description, @amount, @status, @dueDate, @completedAt, @convertedMovementId, @convertedAt, @createdAt, @updatedAt
+    )
+  `),
+  updateCommitment: db.prepare(`
+    UPDATE commitments
+    SET type = ?, description = ?, amount = ?, due_date = ?, updated_at = ?
+    WHERE id = ? AND user_id = ? AND cycle_id = ?
+  `),
+  updateCommitmentStatus: db.prepare(`
+    UPDATE commitments
+    SET status = ?, completed_at = ?, updated_at = ?
+    WHERE id = ? AND user_id = ? AND cycle_id = ?
+  `),
+  updateCommitmentConversion: db.prepare(`
+    UPDATE commitments
+    SET converted_movement_id = ?, converted_at = ?, updated_at = ?
+    WHERE id = ? AND user_id = ? AND cycle_id = ?
+  `),
+  deleteCommitment: db.prepare(`DELETE FROM commitments WHERE id = ? AND user_id = ? AND cycle_id = ?`),
   findGoalById: db.prepare(`
     SELECT
       goals.id,
@@ -249,6 +331,7 @@ const statements = {
       goals.cycle_id AS cycleId,
       goals.name,
       goals.slug,
+      goals.accent,
       goals.target_amount AS targetAmount,
       goals.saved_amount AS savedAmount,
       goals.created_at AS createdAt,
@@ -264,6 +347,7 @@ const statements = {
       goals.cycle_id AS cycleId,
       goals.name,
       goals.slug,
+      goals.accent,
       goals.target_amount AS targetAmount,
       goals.saved_amount AS savedAmount,
       goals.created_at AS createdAt,
@@ -279,15 +363,15 @@ const statements = {
   `),
   insertGoal: db.prepare(`
     INSERT INTO goals (
-      id, user_id, cycle_id, name, slug, target_amount, saved_amount, created_at, updated_at
+      id, user_id, cycle_id, name, slug, accent, target_amount, saved_amount, created_at, updated_at
     )
     VALUES (
-      @id, @userId, @cycleId, @name, @slug, @targetAmount, @savedAmount, @createdAt, @updatedAt
+      @id, @userId, @cycleId, @name, @slug, @accent, @targetAmount, @savedAmount, @createdAt, @updatedAt
     )
   `),
   updateGoal: db.prepare(`
     UPDATE goals
-    SET name = ?, slug = ?, target_amount = ?, updated_at = ?
+    SET name = ?, slug = ?, accent = ?, target_amount = ?, updated_at = ?
     WHERE id = ? AND user_id = ? AND cycle_id = ?
   `),
   updateGoalSavedAmount: db.prepare(`
@@ -440,6 +524,13 @@ function ensureMovementReceiptColumns() {
   }
 }
 
+function ensureGoalAccentColumn() {
+  const columns = db.prepare(`PRAGMA table_info(goals)`).all().map((column) => column.name);
+  if (!columns.includes("accent")) {
+    db.exec(`ALTER TABLE goals ADD COLUMN accent TEXT`);
+  }
+}
+
 const RECEIPT_LIMITS = {
   image: 5 * 1024 * 1024,
   pdf: 10 * 1024 * 1024,
@@ -549,6 +640,24 @@ function normalizeGoalName(name) {
   return String(name || "")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+const GOAL_ACCENTS = new Set(["cyan", "green", "purple", "pink", "amber", "blue", "coral", "neutral"]);
+const GOAL_ACCENT_ORDER = ["cyan", "green", "purple", "pink", "amber", "blue", "coral", "neutral"];
+
+function normalizeGoalAccent(value, fallback = "cyan") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (GOAL_ACCENTS.has(normalized)) return normalized;
+  return GOAL_ACCENTS.has(fallback) ? fallback : "cyan";
+}
+
+function pickGoalAccentSeed(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  let hash = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
+  }
+  return GOAL_ACCENT_ORDER[hash % GOAL_ACCENT_ORDER.length] || "cyan";
 }
 
 function slugify(name) {
@@ -829,7 +938,7 @@ function serializeMovement(row) {
     categoryName: row.categoryName,
     categoryType: row.categoryType,
     description: row.description,
-    date: row.date,
+    date: row.date || row.movementDate || row.movement_date || "",
     sourceKey: row.sourceKey,
     receipt,
     createdAt: row.createdAt,
@@ -869,16 +978,37 @@ function serializeGoal(row) {
   if (!row) return null;
   const targetAmount = Number(row.targetAmount || 0);
   const savedAmount = Number(row.savedAmount || 0);
+  const accent = normalizeGoalAccent(row.accent, "") || pickGoalAccentSeed(row.slug || row.name || row.id || "goal");
   return {
     id: row.id,
     userId: row.userId,
     cycleId: row.cycleId,
     name: row.name,
     slug: row.slug,
+    accent,
     targetAmount,
     savedAmount,
     remainingAmount: Math.max(targetAmount - savedAmount, 0),
     progress: targetAmount > 0 ? Math.max(Math.round((savedAmount / targetAmount) * 100), 0) : 0,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function serializeCommitment(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.userId,
+    cycleId: row.cycleId,
+    type: row.type,
+    description: row.description,
+    amount: Number(row.amount || 0),
+    status: row.status,
+    dueDate: row.dueDate || null,
+    completedAt: row.completedAt || null,
+    convertedMovementId: row.convertedMovementId || null,
+    convertedAt: row.convertedAt || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -902,6 +1032,10 @@ function listClosedCyclesByUser(userId) {
 
 function listGoalsByCycle(userId, cycleId) {
   return statements.listGoalsByCycle.all(userId, cycleId).map(serializeGoal);
+}
+
+function listCommitmentsByCycle(userId, cycleId) {
+  return statements.listCommitmentsByCycle.all(userId, cycleId).map(serializeCommitment);
 }
 
 function getCycleSummary(userId, cycleId) {
@@ -941,7 +1075,7 @@ function ensureCurrentCycle(userId) {
     statements.assignLegacyMovementsToCycle.run(cycle.id, userId);
   }
 
-  return serializeCycle(cycle);
+  return getCycleSummary(userId, cycle.id) || serializeCycle(cycle);
 }
 
 function getGoalSummary(userId, cycleId) {
@@ -995,10 +1129,11 @@ function closeCurrentCycle(userId) {
   };
 }
 
-function ensureGoalCapacity(userId, cycleId, name, targetAmount) {
+function ensureGoalCapacity(userId, cycleId, name, targetAmount, accentValue) {
   const normalizedName = normalizeGoalName(name);
   const slug = slugify(normalizedName);
   const amount = Number(targetAmount);
+  const accent = normalizeGoalAccent(accentValue, "cyan");
 
   if (!normalizedName || !slug || !Number.isFinite(amount) || amount <= 0) {
     const error = new Error("invalid_goal");
@@ -1021,6 +1156,7 @@ function ensureGoalCapacity(userId, cycleId, name, targetAmount) {
     cycleId,
     name: normalizedName,
     slug,
+    accent,
     targetAmount: amount,
     savedAmount: 0,
     createdAt: timestamp,
@@ -1030,7 +1166,7 @@ function ensureGoalCapacity(userId, cycleId, name, targetAmount) {
   return statements.findGoalById.get(id, userId, cycleId);
 }
 
-function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount) {
+function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount, accentValue) {
   const current = statements.findGoalById.get(goalId, userId, cycleId);
   if (!current) {
     const error = new Error("goal_not_found");
@@ -1041,6 +1177,9 @@ function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount) {
   const normalizedName = normalizeGoalName(name);
   const slug = slugify(normalizedName);
   const amount = Number(targetAmount);
+  const accent = accentValue && String(accentValue).trim()
+    ? normalizeGoalAccent(accentValue, current.accent || "cyan")
+    : current.accent || null;
 
   if (!normalizedName || !slug || !Number.isFinite(amount) || amount <= 0) {
     const error = new Error("invalid_goal");
@@ -1062,7 +1201,7 @@ function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount) {
   }
 
   const timestamp = nowIso();
-  statements.updateGoal.run(normalizedName, slug, amount, timestamp, goalId, userId, cycleId);
+  statements.updateGoal.run(normalizedName, slug, accent, amount, timestamp, goalId, userId, cycleId);
   return statements.findGoalById.get(goalId, userId, cycleId);
 }
 
@@ -1132,6 +1271,256 @@ function deleteGoalById(userId, cycleId, goalId) {
 
   statements.deleteGoal.run(goalId, userId, cycleId);
   return goal;
+}
+
+function normalizeCommitmentType(value) {
+  return value === "receivable" ? "receivable" : "payable";
+}
+
+function ensureCommitmentCapacity(userId, cycleId, body) {
+  const type = normalizeCommitmentType(body.type);
+  const description = String(body.description || "").trim().replace(/\s+/g, " ");
+  const amount = Number(body.amount);
+  const dueDate = String(body.dueDate || body.due_date || "").trim();
+  const normalizedDueDate = dueDate ? dueDate.slice(0, 10) : null;
+
+  if (!description || !Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("invalid_commitment");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (normalizedDueDate && Number.isNaN(new Date(`${normalizedDueDate}T12:00:00`).getTime())) {
+    const error = new Error("invalid_commitment_due_date");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const timestamp = nowIso();
+  const id = String(body.id || uuid()).trim();
+  const existing = statements.findCommitmentById.get(id, userId, cycleId);
+  if (existing) {
+    const error = new Error("commitment_exists");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  statements.insertCommitment.run({
+    id,
+    userId,
+    cycleId,
+    type,
+    description,
+    amount,
+    status: "pending",
+    dueDate: normalizedDueDate,
+    completedAt: null,
+    convertedMovementId: null,
+    convertedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  return statements.findCommitmentById.get(id, userId, cycleId);
+}
+
+function updateCommitmentById(userId, cycleId, commitmentId, body) {
+  const current = statements.findCommitmentById.get(commitmentId, userId, cycleId);
+  if (!current) {
+    const error = new Error("commitment_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const type = normalizeCommitmentType(body.type || current.type);
+  const description = String(body.description || "").trim().replace(/\s+/g, " ");
+  const amount = Number(body.amount);
+  const dueDate = String(body.dueDate || body.due_date || "").trim();
+  const normalizedDueDate = dueDate ? dueDate.slice(0, 10) : null;
+
+  if (!description || !Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("invalid_commitment");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (normalizedDueDate && Number.isNaN(new Date(`${normalizedDueDate}T12:00:00`).getTime())) {
+    const error = new Error("invalid_commitment_due_date");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const timestamp = nowIso();
+  statements.updateCommitment.run(type, description, amount, normalizedDueDate, timestamp, commitmentId, userId, cycleId);
+  return statements.findCommitmentById.get(commitmentId, userId, cycleId);
+}
+
+function setCommitmentStatus(userId, cycleId, commitmentId, status) {
+  const current = statements.findCommitmentById.get(commitmentId, userId, cycleId);
+  if (!current) {
+    const error = new Error("commitment_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const nextStatus = status === "done" ? "done" : "pending";
+  const completedAt = nextStatus === "done" ? (current.completedAt || nowIso()) : null;
+  statements.updateCommitmentStatus.run(nextStatus, completedAt, nowIso(), commitmentId, userId, cycleId);
+  return statements.findCommitmentById.get(commitmentId, userId, cycleId);
+}
+
+function convertCommitmentToMovement(userId, cycleId, commitmentId, cycleSummaryOverride = null) {
+  const current = statements.findCommitmentById.get(commitmentId, userId, cycleId);
+  if (!current) {
+    const error = new Error("commitment_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const sourceKey = `commitment:${current.id}:launch`;
+  const existingMovement = statements.findMovementBySource.get(userId, sourceKey);
+  const completedAt = current.completedAt || nowIso();
+  const movementDate = completedAt.slice(0, 10);
+  if (existingMovement?.id) {
+    const timestamp = nowIso();
+    if (current.status !== "done" || !current.completedAt) {
+      statements.updateCommitmentStatus.run("done", completedAt, timestamp, commitmentId, userId, cycleId);
+    }
+    const existingMovementData = statements.findMovementById.get(existingMovement.id, userId);
+    if (existingMovementData && existingMovementData.date !== movementDate) {
+      statements.updateMovement.run(
+        existingMovementData.type,
+        existingMovementData.amount,
+        existingMovementData.categoryId,
+        existingMovementData.description,
+        movementDate,
+        timestamp,
+        existingMovementData.id,
+        userId,
+      );
+    }
+    if (!current.convertedMovementId || current.convertedMovementId !== existingMovement.id) {
+      statements.updateCommitmentConversion.run(existingMovement.id, current.convertedAt || timestamp, timestamp, commitmentId, userId, cycleId);
+    }
+    return {
+      commitment: statements.findCommitmentById.get(commitmentId, userId, cycleId),
+      movement: statements.findMovementById.get(existingMovement.id, userId),
+      created: false,
+    };
+  }
+
+  if (current.type === "payable") {
+    const cycleSummary = cycleSummaryOverride || statements.listCycleSummaryById.get(userId, cycleId);
+    const reservedTotal = getGoalSummary(userId, cycleId);
+    const availableBalance = Number(cycleSummary?.balance || 0) - Number(reservedTotal || 0);
+    if (availableBalance < Number(current.amount || 0)) {
+      const error = new Error("insufficient_balance");
+      error.statusCode = 409;
+      error.availableBalance = availableBalance;
+      error.requiredBalance = Number(current.amount || 0);
+      throw error;
+    }
+  }
+
+  const timestamp = nowIso();
+  const movementId = uuid();
+  const categoryType = current.type === "receivable" ? "income" : "expense";
+  const category = ensureCategoryCapacity(userId, categoryType, "outros");
+  const finalStatus = "done";
+
+  db.exec("BEGIN");
+  try {
+    const refreshed = statements.findCommitmentById.get(commitmentId, userId, cycleId);
+    const refreshedSourceKey = `commitment:${refreshed.id}:launch`;
+    const recheckMovement = statements.findMovementBySource.get(userId, refreshedSourceKey);
+    if (recheckMovement?.id) {
+      if (refreshed.status !== "done" || !refreshed.completedAt) {
+        statements.updateCommitmentStatus.run("done", completedAt, timestamp, commitmentId, userId, cycleId);
+      }
+      const recheckMovementData = statements.findMovementById.get(recheckMovement.id, userId);
+      if (recheckMovementData && recheckMovementData.date !== movementDate) {
+        statements.updateMovement.run(
+          recheckMovementData.type,
+          recheckMovementData.amount,
+          recheckMovementData.categoryId,
+          recheckMovementData.description,
+          movementDate,
+          timestamp,
+          recheckMovementData.id,
+          userId,
+        );
+      }
+      if (!refreshed.convertedMovementId || refreshed.convertedMovementId !== recheckMovement.id) {
+        statements.updateCommitmentConversion.run(recheckMovement.id, refreshed.convertedAt || timestamp, timestamp, commitmentId, userId, cycleId);
+      }
+      db.exec("COMMIT");
+      return {
+        commitment: statements.findCommitmentById.get(commitmentId, userId, cycleId),
+        movement: statements.findMovementById.get(recheckMovement.id, userId),
+        created: false,
+      };
+    }
+
+    statements.insertMovement.run({
+      id: movementId,
+      userId,
+      cycleId,
+      type: categoryType,
+      amount: current.amount,
+      categoryId: category.id,
+      description: current.description,
+      movementDate,
+      sourceKey: refreshedSourceKey,
+      receiptStoredName: null,
+      receiptOriginalName: null,
+      receiptMimeType: null,
+      receiptSize: null,
+      receiptUploadedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    statements.updateCommitmentStatus.run(finalStatus, completedAt, timestamp, commitmentId, userId, cycleId);
+    statements.updateCommitmentConversion.run(movementId, timestamp, timestamp, commitmentId, userId, cycleId);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    commitment: statements.findCommitmentById.get(commitmentId, userId, cycleId),
+    movement: statements.findMovementById.get(movementId, userId),
+    created: true,
+  };
+}
+
+function reopenCommitmentAndRevertMovement(userId, cycleId, commitmentId) {
+  const current = statements.findCommitmentById.get(commitmentId, userId, cycleId);
+  if (!current) {
+    const error = new Error("commitment_not_found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const timestamp = nowIso();
+  const linkedMovementId = current.convertedMovementId || null;
+  const linkedMovement = linkedMovementId ? statements.findMovementById.get(linkedMovementId, userId) : null;
+  const linkedBySource = linkedMovement ? linkedMovement : statements.findMovementBySource.get(userId, `commitment:${current.id}:launch`);
+
+  db.exec("BEGIN");
+  try {
+    if (linkedBySource?.id) {
+      statements.deleteMovement.run(linkedBySource.id, userId);
+    }
+    statements.updateCommitmentStatus.run("pending", null, timestamp, commitmentId, userId, cycleId);
+    statements.updateCommitmentConversion.run(null, null, timestamp, commitmentId, userId, cycleId);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return statements.findCommitmentById.get(commitmentId, userId, cycleId);
 }
 
 function listAllowedReceiptInfo(file) {
@@ -1350,6 +1739,7 @@ function collectUserBootstrap(userId) {
     categories: listCategoriesByUser(userId),
     movements: listMovementsByCycle(userId, currentCycle.id),
     goals: listGoalsByCycle(userId, currentCycle.id),
+    commitments: listCommitmentsByCycle(userId, currentCycle.id),
   };
 }
 
@@ -1509,6 +1899,108 @@ function handleImport(request, response, context, body) {
 
 function handleBootstrap(response, context) {
   sendJson(response, 200, collectUserBootstrap(context.user.id));
+}
+
+function handleCommitments(request, response, context, pathname, method, body) {
+  const userId = context.user.id;
+  const currentCycle = ensureCurrentCycle(userId);
+
+  if (method === "GET" && pathname === "/api/commitments") {
+    sendJson(response, 200, {
+      currentCycle,
+      commitments: listCommitmentsByCycle(userId, currentCycle.id),
+    });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/commitments") {
+    const commitment = ensureCommitmentCapacity(userId, currentCycle.id, body);
+    sendJson(response, 201, {
+      ok: true,
+      commitment: serializeCommitment(commitment),
+      commitments: listCommitmentsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  const match = pathname.match(/^\/api\/commitments\/([^/]+)(?:\/(complete|reopen|convert-to-movement))?$/);
+  if (!match) {
+    sendJson(response, 404, { error: "not_found" });
+    return;
+  }
+
+  const commitmentId = decodeURIComponent(match[1]);
+  const action = match[2] || "";
+
+  if (method === "PUT" || method === "PATCH") {
+    const commitment = updateCommitmentById(userId, currentCycle.id, commitmentId, body);
+    sendJson(response, 200, {
+      ok: true,
+      commitment: serializeCommitment(commitment),
+      commitments: listCommitmentsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  if (method === "DELETE" && !action) {
+    const commitment = statements.findCommitmentById.get(commitmentId, userId, currentCycle.id);
+    if (!commitment) {
+      sendJson(response, 404, { error: "not_found" });
+      return;
+    }
+    statements.deleteCommitment.run(commitmentId, userId, currentCycle.id);
+    sendJson(response, 200, {
+      ok: true,
+      commitment: serializeCommitment(commitment),
+      commitments: listCommitmentsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  if (method === "POST" && action === "complete") {
+    const result = convertCommitmentToMovement(userId, currentCycle.id, commitmentId, currentCycle);
+    sendJson(response, 200, {
+      ok: true,
+      commitment: serializeCommitment(result.commitment),
+      movement: serializeMovement(result.movement),
+      created: result.created,
+      commitments: listCommitmentsByCycle(userId, currentCycle.id),
+      movements: listMovementsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  if (method === "POST" && action === "reopen") {
+    const commitment = reopenCommitmentAndRevertMovement(userId, currentCycle.id, commitmentId);
+    sendJson(response, 200, {
+      ok: true,
+      commitment: serializeCommitment(commitment),
+      commitments: listCommitmentsByCycle(userId, currentCycle.id),
+      movements: listMovementsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  if (method === "POST" && action === "convert-to-movement") {
+    const result = convertCommitmentToMovement(userId, currentCycle.id, commitmentId, currentCycle);
+    sendJson(response, 200, {
+      ok: true,
+      commitment: serializeCommitment(result.commitment),
+      movement: serializeMovement(result.movement),
+      created: result.created,
+      commitments: listCommitmentsByCycle(userId, currentCycle.id),
+      movements: listMovementsByCycle(userId, currentCycle.id),
+      currentCycle,
+    });
+    return;
+  }
+
+  sendJson(response, 405, { error: "method_not_allowed" });
 }
 
 function handleCategories(request, response, context, pathname, method, body) {
@@ -1741,7 +2233,7 @@ function handleGoals(request, response, context, pathname, method, body) {
   }
 
   if (method === "POST" && pathname === "/api/goals") {
-    const goal = ensureGoalCapacity(userId, currentCycle.id, body.name, body.targetAmount);
+    const goal = ensureGoalCapacity(userId, currentCycle.id, body.name, body.targetAmount, body.accent || body.theme);
     sendJson(response, 201, {
       ok: true,
       goal: serializeGoal(goal),
@@ -1761,7 +2253,7 @@ function handleGoals(request, response, context, pathname, method, body) {
   const action = match[2] || "";
 
   if (method === "PUT" || method === "PATCH") {
-    const goal = updateGoalCapacity(userId, currentCycle.id, goalId, body.name, body.targetAmount);
+    const goal = updateGoalCapacity(userId, currentCycle.id, goalId, body.name, body.targetAmount, body.accent || body.theme);
     sendJson(response, 200, {
       ok: true,
       goal: serializeGoal(goal),
@@ -1901,6 +2393,14 @@ const server = http.createServer(async (request, response) => {
         ...result,
         movements: listMovementsByCycle(context.user.id, result.currentCycle.id),
       });
+      return;
+    }
+
+    if (pathname.startsWith("/api/commitments")) {
+      const context = requireAuth(request, response);
+      if (!context) return;
+      const body = method === "GET" || method === "DELETE" ? {} : await readJsonBody(request);
+      handleCommitments(request, response, context, pathname, method, body);
       return;
     }
 

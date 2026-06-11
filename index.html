@@ -17,7 +17,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=20260611-authfix" />
 </head>
 
 <body>
@@ -120,6 +120,17 @@
             </svg>
             <span>Análise</span>
           </button>
+          <button class="nav-tab" type="button" data-tab="commitments">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 6h11" />
+              <path d="M8 12h11" />
+              <path d="M8 18h11" />
+              <path d="M4 6h.01" />
+              <path d="M4 12h.01" />
+              <path d="M4 18h.01" />
+            </svg>
+            <span>Contas</span>
+          </button>
           <button class="nav-tab" type="button" data-tab="insights">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3v3" />
@@ -161,8 +172,9 @@
         <div class="section-switcher-shell" id="section-switcher-shell">
           <button class="section-switcher" id="section-switcher" type="button" aria-expanded="false"
             aria-controls="section-switcher-panel">
+            <span class="section-switcher-mark" id="section-switcher-mark" aria-hidden="true"></span>
             <div class="section-switcher-copy">
-              <span class="mini-label">Seção</span>
+              <span class="mini-label">Seção atual</span>
               <strong id="section-switcher-label">Resumo</strong>
               <small id="section-switcher-copy">Ciclo ativo</small>
             </div>
@@ -257,6 +269,54 @@
             <h2>Por categoria</h2>
           </div>
           <div class="category-bars" id="category-bars"></div>
+        </section>
+
+        <section class="tab-panel" id="tab-commitments" data-title="Contas do mês, sem ruído.">
+          <article class="commitments-hero">
+            <div>
+              <span class="mini-label">Planejamento do mês</span>
+              <strong id="commitments-hero-title">Sem itens planejados por enquanto</strong>
+              <p id="commitments-hero-copy">Registre o que ainda vai pagar ou receber e acompanhe o mês sem misturar isso com o histórico real.</p>
+              <div class="commitments-hero-stats">
+                <span><strong id="commitments-pending-payable">R$ 0,00</strong><small>a pagar</small></span>
+                <span><strong id="commitments-pending-receivable">R$ 0,00</strong><small>a receber</small></span>
+                <span><strong id="commitments-done-total">R$ 0,00</strong><small>concluído</small></span>
+              </div>
+            </div>
+            <button class="primary-action compact" id="open-commitment-sheet" type="button">Novo compromisso</button>
+          </article>
+
+          <p class="form-note commitment-feedback" id="commitment-feedback" role="alert"></p>
+
+          <div class="commitments-summary">
+            <article class="commitments-metric">
+              <span class="mini-label">Planejados</span>
+              <strong id="commitments-count">0 itens</strong>
+            </article>
+            <article class="commitments-metric">
+              <span class="mini-label">Pendentes</span>
+              <strong id="commitments-pending-count">0 planejados</strong>
+            </article>
+            <article class="commitments-metric">
+              <span class="mini-label">Realizados</span>
+              <strong id="commitments-done-count">0 realizados</strong>
+            </article>
+          </div>
+
+          <div class="commitment-board" id="commitment-board">
+            <section class="commitment-column">
+              <div class="section-heading compact">
+                <h2>Pendentes</h2>
+              </div>
+              <div class="commitment-list" id="commitment-pending-list"></div>
+            </section>
+            <section class="commitment-column">
+              <div class="section-heading compact">
+                <h2>Concluídos</h2>
+              </div>
+              <div class="commitment-list" id="commitment-done-list"></div>
+            </section>
+          </div>
         </section>
 
         <section class="tab-panel" id="tab-insights" data-title="Pequenos sinais, boas decisões.">
@@ -592,6 +652,13 @@
         <input id="goal-target" type="text" inputmode="decimal" placeholder="0,00" required />
       </label>
 
+      <div class="field goal-accent-field">
+        <span>Cor da meta</span>
+        <p class="form-note">Escolha um tom para identificar o card com mais facilidade.</p>
+        <input type="hidden" id="goal-accent" value="cyan" />
+        <div class="goal-accent-grid" id="goal-accent-options" role="radiogroup" aria-label="Cor da meta"></div>
+      </div>
+
       <button class="primary-action" id="save-goal" type="submit">Salvar meta</button>
     </form>
   </section>
@@ -628,8 +695,56 @@
     </form>
   </section>
 
-  <script src="./app.js"></script>
-  <script src="./receipt-camera.js"></script>
+  <section class="sheet" id="commitment-sheet" aria-hidden="true">
+    <div class="sheet-backdrop" data-close-commitment-sheet></div>
+    <form class="movement-form commitment-form" id="commitment-form">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <div>
+          <p class="eyebrow">Contas</p>
+          <h2 id="commitment-sheet-title">Novo compromisso</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-commitment-sheet aria-label="Fechar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="commitment-form-body">
+        <input type="hidden" id="commitment-id" />
+
+        <div class="type-toggle commitment-type-toggle" role="group" aria-label="Tipo de compromisso">
+          <button class="toggle-option active" type="button" data-commitment-type="payable">A pagar</button>
+          <button class="toggle-option" type="button" data-commitment-type="receivable">A receber</button>
+        </div>
+
+        <label class="field">
+          <span>Descrição do compromisso</span>
+          <input id="commitment-description" type="text" maxlength="42" placeholder="Aluguel, cliente, boleto..." required />
+        </label>
+
+        <label class="field value-field">
+          <span>Valor</span>
+          <input id="commitment-amount" type="text" inputmode="decimal" placeholder="0,00" required />
+        </label>
+
+        <label class="field">
+          <span>Data de vencimento</span>
+          <input id="commitment-due-date" type="date" />
+        </label>
+
+        <p class="form-note" id="commitment-hint">Planejado não altera saldo, histórico ou análise até você lançar no histórico.</p>
+
+        <button class="primary-action" id="save-commitment" type="submit">Salvar compromisso</button>
+        <button class="secondary-action" type="button" data-close-commitment-sheet>Cancelar</button>
+      </div>
+    </form>
+  </section>
+
+  <script src="./app.js?v=20260611-authfix"></script>
+  <script src="./receipt-camera.js?v=20260611-authfix"></script>
 </body>
 
 </html>
