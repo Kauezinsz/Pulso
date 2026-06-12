@@ -46,11 +46,11 @@
         <form class="auth-form active" id="login-form">
           <label class="field">
             <span>E-mail</span>
-            <input id="login-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
+            <input id="login-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" maxlength="254" required />
           </label>
           <label class="field">
             <span>Senha</span>
-            <input id="login-password" type="password" autocomplete="current-password" placeholder="Sua senha"
+            <input id="login-password" type="password" autocomplete="current-password" placeholder="Sua senha" maxlength="128"
               required />
           </label>
           <button class="primary-action" type="submit">Entrar</button>
@@ -59,11 +59,11 @@
         <form class="auth-form" id="register-form" hidden>
           <label class="field">
             <span>E-mail</span>
-            <input id="register-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" required />
+            <input id="register-email" type="email" autocomplete="email" placeholder="voce@exemplo.com" maxlength="254" required />
           </label>
           <label class="field">
             <span>Senha</span>
-            <input id="register-password" type="password" autocomplete="new-password"
+            <input id="register-password" type="password" autocomplete="new-password" minlength="8" maxlength="128"
               placeholder="Pelo menos 8 caracteres" required />
           </label>
           <button class="primary-action" type="submit">Criar conta</button>
@@ -407,7 +407,7 @@
 
         <label class="field value-field">
           <span>Valor</span>
-          <input id="amount" type="text" inputmode="decimal" placeholder="0,00" required />
+          <input id="amount" type="text" inputmode="decimal" maxlength="18" placeholder="0,00" required />
         </label>
 
         <div class="field category-field">
@@ -423,7 +423,7 @@
 
         <label class="field">
           <span>Descrição curta</span>
-          <input id="description" type="text" maxlength="42" placeholder="Café, mercado, freela..." required />
+          <input id="description" type="text" maxlength="120" placeholder="Café, mercado, freela..." required />
         </label>
 
         <label class="field">
@@ -522,7 +522,7 @@
       <div class="new-category-panel" id="new-category-panel" hidden>
         <label class="field">
           <span id="category-editor-title">Nova categoria</span>
-          <input id="new-category-name" type="text" maxlength="28" placeholder="Nome da categoria" />
+          <input id="new-category-name" type="text" maxlength="60" placeholder="Nome da categoria" />
         </label>
         <button class="primary-action compact" id="save-category" type="button">Salvar categoria</button>
         <p class="form-note" id="category-error" role="alert"></p>
@@ -644,12 +644,12 @@
       <input type="hidden" id="goal-id" />
       <label class="field">
         <span>Nome da meta</span>
-        <input id="goal-name" type="text" maxlength="32" placeholder="Viagem, reserva, curso..." required />
+        <input id="goal-name" type="text" maxlength="60" placeholder="Viagem, reserva, curso..." required />
       </label>
 
       <label class="field value-field">
         <span>Valor alvo</span>
-        <input id="goal-target" type="text" inputmode="decimal" placeholder="0,00" required />
+        <input id="goal-target" type="text" inputmode="decimal" maxlength="18" placeholder="0,00" required />
       </label>
 
       <div class="field goal-accent-field">
@@ -686,7 +686,7 @@
       <p class="migration-copy" id="goal-amount-copy">Quanto você quer guardar nessa meta?</p>
       <label class="field value-field">
         <span>Valor</span>
-        <input id="goal-amount" type="text" inputmode="decimal" placeholder="0,00" required />
+        <input id="goal-amount" type="text" inputmode="decimal" maxlength="18" placeholder="0,00" required />
       </label>
       <p class="form-note" id="goal-amount-note">Use um valor dentro do saldo disponível.</p>
 
@@ -722,12 +722,12 @@
 
         <label class="field">
           <span>Descrição do compromisso</span>
-          <input id="commitment-description" type="text" maxlength="42" placeholder="Aluguel, cliente, boleto..." required />
+          <input id="commitment-description" type="text" maxlength="120" placeholder="Aluguel, cliente, boleto..." required />
         </label>
 
         <label class="field value-field">
           <span>Valor</span>
-          <input id="commitment-amount" type="text" inputmode="decimal" placeholder="0,00" required />
+          <input id="commitment-amount" type="text" inputmode="decimal" maxlength="18" placeholder="0,00" required />
         </label>
 
         <label class="field">
@@ -743,7 +743,7 @@
     </form>
   </section>
 
-  <script src="./app.js?v=20260611-authfix"></script>
+  <script src="./app.js?v=20260612-auth-hardening"></script>
   <script src="./receipt-camera.js?v=20260611-authfix"></script>
 </body>
 

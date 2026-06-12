@@ -11,6 +11,32 @@ const appBasePath = process.env.PULSO_BASE_PATH || "/pulso";
 const dataDir = path.join(root, "data");
 const uploadsDir = path.join(dataDir, "uploads");
 const dbPath = process.env.PULSO_DB_PATH || path.join(dataDir, "pulso.sqlite");
+const sessionDays = Number(process.env.PULSO_SESSION_DAYS || 30);
+const SESSION_COOKIE_NAME = "pulso_session";
+const SESSION_TTL_MS = Math.min(Math.max(Number.isFinite(sessionDays) ? sessionDays : 30, 1), 90) * 24 * 60 * 60 * 1000;
+const AUTH_BODY_LIMIT_BYTES = 16 * 1024;
+const AUTH_EMAIL_MAX_LENGTH = 254;
+const AUTH_PASSWORD_MIN_LENGTH = 8;
+const AUTH_PASSWORD_MAX_LENGTH = 128;
+const DOMAIN_TEXT_LIMITS = {
+  categoryName: 60,
+  movementDescription: 120,
+  goalName: 60,
+  commitmentDescription: 120,
+  cycleLabel: 80,
+};
+const DOMAIN_AMOUNT_MAX = 999999999.99;
+const DOMAIN_DATE_MIN_YEAR = 1900;
+const DOMAIN_DATE_MAX_YEAR = 2100;
+const HSTS_MAX_AGE = Math.max(0, Number(process.env.PULSO_HSTS_MAX_AGE || 15552000));
+const HSTS_INCLUDE_SUBDOMAINS = ["1", "true", "yes"].includes(String(process.env.PULSO_HSTS_INCLUDE_SUBDOMAINS || "").trim().toLowerCase());
+const RATE_LIMIT_POLICIES = {
+  loginIp: { max: 20, windowMs: 15 * 60 * 1000, blockMs: 15 * 60 * 1000 },
+  loginEmail: { max: 8, windowMs: 15 * 60 * 1000, blockMs: 15 * 60 * 1000 },
+  registerIp: { max: 8, windowMs: 60 * 60 * 1000, blockMs: 60 * 60 * 1000 },
+};
+const authRateLimits = new Map();
+let lastSessionCleanupAt = 0;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -33,6 +59,42 @@ function withAppBasePath(pathname) {
   if (!appBasePath || appBasePath === "/") return pathname;
   if (pathname.startsWith(appBasePath)) return pathname;
   return `${appBasePath}${pathname}`;
+}
+
+function buildSecurityHeaders(request) {
+  const headers = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self), autoplay=(), display-capture=(), clipboard-read=(), clipboard-write=(), xr-spatial-tracking=(), screen-wake-lock=()",
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' blob: data:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "manifest-src 'self'",
+      "worker-src 'self'",
+      "media-src 'self' blob:",
+    ].join("; "),
+  };
+
+  if (HSTS_MAX_AGE > 0) {
+    const parts = [`max-age=${Math.floor(HSTS_MAX_AGE)}`];
+    if (HSTS_INCLUDE_SUBDOMAINS) parts.push("includeSubDomains");
+    headers["Strict-Transport-Security"] = parts.join("; ");
+  }
+
+  return headers;
+}
+
+function staticCacheControlFor(filePath) {
+  return path.extname(filePath) === ".html" ? "no-store" : "no-cache";
 }
 
 fs.mkdirSync(dataDir, { recursive: true });
@@ -163,6 +225,7 @@ const statements = {
   updateSessionSeen: db.prepare(`UPDATE sessions SET last_seen_at = ? WHERE id = ?`),
   deleteSessionById: db.prepare(`DELETE FROM sessions WHERE id = ?`),
   deleteSessionByTokenHash: db.prepare(`DELETE FROM sessions WHERE token_hash = ?`),
+  deleteExpiredSessions: db.prepare(`DELETE FROM sessions WHERE expires_at <= ?`),
   insertCycle: db.prepare(`
     INSERT INTO cycles (id, user_id, label, status, started_at, closed_at, created_at, updated_at)
     VALUES (@id, @userId, @label, @status, @startedAt, @closedAt, @createdAt, @updatedAt)
@@ -592,6 +655,7 @@ function streamFile(response, filePath, mimeType, fileName) {
   const stream = fs.createReadStream(filePath);
   const safeName = sanitizeFileName(fileName);
   response.writeHead(200, {
+    ...buildSecurityHeaders(),
     "Content-Type": mimeType,
     "Content-Disposition": `inline; filename="${safeName}"`,
     "Cache-Control": "no-store",
@@ -629,17 +693,142 @@ function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+function isValidAuthEmail(email) {
+  if (!email || email.length > AUTH_EMAIL_MAX_LENGTH) return false;
+  if (/\s/.test(email)) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function normalizeAuthPassword(password) {
+  return typeof password === "string" ? password : "";
+}
+
+function isValidAuthPassword(password) {
+  return password.length >= AUTH_PASSWORD_MIN_LENGTH
+    && password.length <= AUTH_PASSWORD_MAX_LENGTH
+    && !/^\s+$/.test(password);
+}
+
+function validateAuthPayload(body, { requireStrongPassword = false } = {}) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const email = normalizeEmail(body.email);
+  const password = normalizeAuthPassword(body.password);
+  if (!isValidAuthEmail(email)) return null;
+  if (!password || password.length > AUTH_PASSWORD_MAX_LENGTH) return null;
+  if (requireStrongPassword && !isValidAuthPassword(password)) return null;
+  return { email, password };
+}
+
 function normalizeName(name) {
-  return String(name || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
+  return validateTextValue(name, { code: "invalid_category", lowerCase: true, maxLength: DOMAIN_TEXT_LIMITS.categoryName });
 }
 
 function normalizeGoalName(name) {
-  return String(name || "")
+  return validateTextValue(name, { code: "invalid_goal", maxLength: DOMAIN_TEXT_LIMITS.goalName });
+}
+
+function normalizeMovementDescription(description) {
+  return validateTextValue(description, { code: "invalid_movement", maxLength: DOMAIN_TEXT_LIMITS.movementDescription });
+}
+
+function normalizeCommitmentDescription(description) {
+  return validateTextValue(description, { code: "invalid_commitment", maxLength: DOMAIN_TEXT_LIMITS.commitmentDescription });
+}
+
+function normalizeDomainLabel(value, maxLength, { lowerCase = false } = {}) {
+  return normalizeTextValue(value, { maxLength, lowerCase });
+}
+
+function normalizeTextValue(value, { lowerCase = false, maxLength = DOMAIN_TEXT_LIMITS.movementDescription } = {}) {
+  const text = String(value || "")
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200d\ufeff]/g, "")
     .trim()
     .replace(/\s+/g, " ");
+  if (!text) return "";
+  return lowerCase ? text.toLowerCase() : text;
+}
+
+function validateTextValue(value, { code, lowerCase = false, minLength = 1, maxLength = DOMAIN_TEXT_LIMITS.movementDescription } = {}) {
+  const normalized = normalizeTextValue(value, { lowerCase, maxLength });
+  if (!normalized || normalized.length < minLength || normalized.length > maxLength) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+  return normalized;
+}
+
+function parsePositiveAmount(value, { code, min = 0.01, max = DOMAIN_AMOUNT_MAX } = {}) {
+  const raw = typeof value === "number" ? String(value) : String(value || "").trim();
+  if (!raw) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (/[eE]/.test(raw)) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const commaCount = (raw.match(/,/g) || []).length;
+  if (commaCount > 1) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalized = raw.includes(",")
+    ? raw.replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "")
+    : raw.replace(/[^\d.-]/g, "");
+  if (!normalized || /-/.test(normalized.slice(1)) || (normalized.match(/\./g) || []).length > 1) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount < min || amount > max) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return amount;
+}
+
+function validateIsoDate(value, code, { allowEmpty = false } = {}) {
+  const text = String(value || "").trim();
+  if (!text) {
+    if (allowEmpty) return null;
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const [yearText] = text.split("-");
+  const year = Number(yearText);
+  if (!Number.isInteger(year) || year < DOMAIN_DATE_MIN_YEAR || year > DOMAIN_DATE_MAX_YEAR) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const parsed = new Date(`${text}T12:00:00`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return text;
 }
 
 const GOAL_ACCENTS = new Set(["cyan", "green", "purple", "pink", "amber", "blue", "coral", "neutral"]);
@@ -691,21 +880,50 @@ function parseCookies(header = "") {
   }, {});
 }
 
+function forwardedHeaderValue(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return String(raw || "").split(",")[0].trim();
+}
+
+function getClientIp(request) {
+  return forwardedHeaderValue(request.headers["x-forwarded-for"])
+    || forwardedHeaderValue(request.headers["x-real-ip"])
+    || request.socket?.remoteAddress
+    || "unknown";
+}
+
+function isSecureRequest(request) {
+  const override = String(process.env.PULSO_SECURE_COOKIES || "").trim().toLowerCase();
+  if (["1", "true", "yes"].includes(override)) return true;
+  if (["0", "false", "no"].includes(override)) return false;
+
+  const forwardedProto = forwardedHeaderValue(request.headers["x-forwarded-proto"]).toLowerCase();
+  const forwardedSsl = forwardedHeaderValue(request.headers["x-forwarded-ssl"]).toLowerCase();
+  return forwardedProto === "https" || forwardedSsl === "on" || Boolean(request.socket?.encrypted);
+}
+
 function setCookie(response, name, value, options = {}) {
-  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax"];
-  if (options.maxAge) parts.push(`Max-Age=${Math.floor(options.maxAge)}`);
+  const sameSite = options.sameSite || "Lax";
+  const pathValue = options.path || "/";
+  const parts = [`${name}=${encodeURIComponent(value)}`, `Path=${pathValue}`, "HttpOnly", `SameSite=${sameSite}`];
+  if (options.maxAge !== undefined) parts.push(`Max-Age=${Math.floor(options.maxAge)}`);
   if (options.expires) parts.push(`Expires=${options.expires.toUTCString()}`);
   if (options.secure) parts.push("Secure");
   response.setHeader("Set-Cookie", parts.join("; "));
 }
 
-function clearCookie(response, name) {
-  response.setHeader("Set-Cookie", `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+function clearCookie(response, name, options = {}) {
+  setCookie(response, name, "", {
+    ...options,
+    maxAge: 0,
+    expires: new Date(0),
+  });
 }
 
 function sendJson(response, statusCode, payload) {
   const body = JSON.stringify(payload);
   response.writeHead(statusCode, {
+    ...buildSecurityHeaders(),
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
   });
@@ -714,10 +932,101 @@ function sendJson(response, statusCode, payload) {
 
 function sendText(response, statusCode, text, contentType = "text/plain; charset=utf-8") {
   response.writeHead(statusCode, {
+    ...buildSecurityHeaders(),
     "Content-Type": contentType,
     "Cache-Control": "no-cache",
   });
   response.end(text);
+}
+
+function cleanupExpiredSessions(force = false) {
+  const timestamp = Date.now();
+  if (!force && timestamp - lastSessionCleanupAt < 5 * 60 * 1000) return;
+  lastSessionCleanupAt = timestamp;
+  statements.deleteExpiredSessions.run(nowIso());
+}
+
+function rateLimitKey(scope, value) {
+  return `${scope}:${sha256(String(value || "unknown")).slice(0, 32)}`;
+}
+
+function pruneAuthRateLimits(timestamp = Date.now()) {
+  for (const [key, entry] of authRateLimits.entries()) {
+    if (entry.resetAt <= timestamp && (!entry.blockedUntil || entry.blockedUntil <= timestamp)) {
+      authRateLimits.delete(key);
+    }
+  }
+}
+
+function getRateLimitEntry(key, policy, timestamp = Date.now()) {
+  pruneAuthRateLimits(timestamp);
+  const existing = authRateLimits.get(key);
+  if (!existing || existing.resetAt <= timestamp) {
+    const fresh = { count: 0, resetAt: timestamp + policy.windowMs, blockedUntil: 0 };
+    authRateLimits.set(key, fresh);
+    return fresh;
+  }
+  return existing;
+}
+
+function checkRateLimit(key, policy) {
+  const timestamp = Date.now();
+  const entry = getRateLimitEntry(key, policy, timestamp);
+  if (entry.blockedUntil > timestamp) {
+    return {
+      limited: true,
+      retryAfter: Math.max(Math.ceil((entry.blockedUntil - timestamp) / 1000), 1),
+    };
+  }
+  return { limited: false, retryAfter: 0 };
+}
+
+function recordRateLimitAttempt(key, policy) {
+  const timestamp = Date.now();
+  const entry = getRateLimitEntry(key, policy, timestamp);
+  entry.count += 1;
+  if (entry.count > policy.max) {
+    entry.blockedUntil = timestamp + policy.blockMs;
+  }
+}
+
+function clearRateLimit(key) {
+  authRateLimits.delete(key);
+}
+
+function enforceAuthRateLimit(response, checks) {
+  for (const check of checks) {
+    const result = checkRateLimit(check.key, check.policy);
+    if (result.limited) {
+      response.setHeader("Retry-After", String(result.retryAfter));
+      sendJson(response, 429, {
+        error: "too_many_requests",
+        message: "Muitas tentativas. Aguarde um pouco e tente novamente.",
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
+function loginRateChecks(request, email = "") {
+  const checks = [
+    { key: rateLimitKey("login:ip", getClientIp(request)), policy: RATE_LIMIT_POLICIES.loginIp },
+  ];
+  if (email) {
+    checks.push({ key: rateLimitKey("login:email", email), policy: RATE_LIMIT_POLICIES.loginEmail });
+  }
+  return checks;
+}
+
+function registerRateChecks(request) {
+  return [
+    { key: rateLimitKey("register:ip", getClientIp(request)), policy: RATE_LIMIT_POLICIES.registerIp },
+  ];
+}
+
+function recordRateLimitAttempts(checks) {
+  checks.forEach((check) => recordRateLimitAttempt(check.key, check.policy));
 }
 
 function readBufferBody(request, limitBytes = 1024 * 1024) {
@@ -727,7 +1036,10 @@ function readBufferBody(request, limitBytes = 1024 * 1024) {
     request.on("data", (chunk) => {
       size += chunk.length;
       if (size > limitBytes) {
-        reject(new Error("Payload too large"));
+        const error = new Error("Payload too large");
+        error.statusCode = 413;
+        error.code = "payload_too_large";
+        reject(error);
         request.destroy();
         return;
       }
@@ -740,13 +1052,16 @@ function readBufferBody(request, limitBytes = 1024 * 1024) {
   });
 }
 
-async function readJsonBody(request) {
-  const buffer = await readBufferBody(request);
+async function readJsonBody(request, limitBytes = 1024 * 1024) {
+  const buffer = await readBufferBody(request, limitBytes);
   if (!buffer.length) return {};
   try {
     return JSON.parse(buffer.toString("utf8"));
   } catch {
-    throw new Error("Invalid JSON");
+    const error = new Error("Invalid JSON");
+    error.statusCode = 400;
+    error.code = "invalid_json";
+    throw error;
   }
 }
 
@@ -827,10 +1142,11 @@ function normalizeRequestPath(pathname) {
 }
 
 function getSessionToken(request) {
-  return parseCookies(request.headers.cookie || "")["pulso_session"] || "";
+  return parseCookies(request.headers.cookie || "")[SESSION_COOKIE_NAME] || "";
 }
 
 function getAuthContext(request) {
+  cleanupExpiredSessions();
   const token = getSessionToken(request);
   if (!token) return null;
 
@@ -1132,10 +1448,10 @@ function closeCurrentCycle(userId) {
 function ensureGoalCapacity(userId, cycleId, name, targetAmount, accentValue) {
   const normalizedName = normalizeGoalName(name);
   const slug = slugify(normalizedName);
-  const amount = Number(targetAmount);
+  const amount = parsePositiveAmount(targetAmount, { code: "invalid_goal" });
   const accent = normalizeGoalAccent(accentValue, "cyan");
 
-  if (!normalizedName || !slug || !Number.isFinite(amount) || amount <= 0) {
+  if (!normalizedName || !slug) {
     const error = new Error("invalid_goal");
     error.statusCode = 400;
     throw error;
@@ -1176,12 +1492,12 @@ function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount, accentV
 
   const normalizedName = normalizeGoalName(name);
   const slug = slugify(normalizedName);
-  const amount = Number(targetAmount);
+  const amount = parsePositiveAmount(targetAmount, { code: "invalid_goal" });
   const accent = accentValue && String(accentValue).trim()
     ? normalizeGoalAccent(accentValue, current.accent || "cyan")
     : current.accent || null;
 
-  if (!normalizedName || !slug || !Number.isFinite(amount) || amount <= 0) {
+  if (!normalizedName || !slug) {
     const error = new Error("invalid_goal");
     error.statusCode = 400;
     throw error;
@@ -1213,12 +1529,7 @@ function saveGoalAmount(userId, cycleId, goalId, amountToSave) {
     throw error;
   }
 
-  const amount = Number(amountToSave);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    const error = new Error("invalid_goal_amount");
-    error.statusCode = 400;
-    throw error;
-  }
+  const amount = parsePositiveAmount(amountToSave, { code: "invalid_goal_amount" });
 
   const currentCycle = getCycleSummary(userId, cycleId);
   const reservedTotal = getGoalSummary(userId, cycleId);
@@ -1242,12 +1553,7 @@ function removeGoalAmount(userId, cycleId, goalId, amountToRemove) {
     throw error;
   }
 
-  const amount = Number(amountToRemove);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    const error = new Error("invalid_goal_amount");
-    error.statusCode = 400;
-    throw error;
-  }
+  const amount = parsePositiveAmount(amountToRemove, { code: "invalid_goal_amount" });
 
   const currentSaved = Number(goal.savedAmount || 0);
   if (amount > currentSaved) {
@@ -1279,19 +1585,12 @@ function normalizeCommitmentType(value) {
 
 function ensureCommitmentCapacity(userId, cycleId, body) {
   const type = normalizeCommitmentType(body.type);
-  const description = String(body.description || "").trim().replace(/\s+/g, " ");
-  const amount = Number(body.amount);
-  const dueDate = String(body.dueDate || body.due_date || "").trim();
-  const normalizedDueDate = dueDate ? dueDate.slice(0, 10) : null;
+  const description = normalizeCommitmentDescription(body.description);
+  const amount = parsePositiveAmount(body.amount, { code: "invalid_commitment" });
+  const normalizedDueDate = validateIsoDate(body.dueDate || body.due_date, "invalid_commitment_due_date", { allowEmpty: true });
 
-  if (!description || !Number.isFinite(amount) || amount <= 0) {
+  if (!description) {
     const error = new Error("invalid_commitment");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (normalizedDueDate && Number.isNaN(new Date(`${normalizedDueDate}T12:00:00`).getTime())) {
-    const error = new Error("invalid_commitment_due_date");
     error.statusCode = 400;
     throw error;
   }
@@ -1333,19 +1632,12 @@ function updateCommitmentById(userId, cycleId, commitmentId, body) {
   }
 
   const type = normalizeCommitmentType(body.type || current.type);
-  const description = String(body.description || "").trim().replace(/\s+/g, " ");
-  const amount = Number(body.amount);
-  const dueDate = String(body.dueDate || body.due_date || "").trim();
-  const normalizedDueDate = dueDate ? dueDate.slice(0, 10) : null;
+  const description = normalizeCommitmentDescription(body.description);
+  const amount = parsePositiveAmount(body.amount, { code: "invalid_commitment" });
+  const normalizedDueDate = validateIsoDate(body.dueDate || body.due_date, "invalid_commitment_due_date", { allowEmpty: true });
 
-  if (!description || !Number.isFinite(amount) || amount <= 0) {
+  if (!description) {
     const error = new Error("invalid_commitment");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (normalizedDueDate && Number.isNaN(new Date(`${normalizedDueDate}T12:00:00`).getTime())) {
-    const error = new Error("invalid_commitment_due_date");
     error.statusCode = 400;
     throw error;
   }
@@ -1678,14 +1970,14 @@ function ensureCategoryCapacity(userId, type, name) {
 function upsertMovement(userId, body, existingId = null) {
   const currentCycle = ensureCurrentCycle(userId);
   const type = body.type === "income" ? "income" : "expense";
-  const amount = Number(body.amount);
+  const amount = parsePositiveAmount(body.amount, { code: "invalid_movement" });
   const categoryId = String(body.categoryId || "").trim();
-  const description = String(body.description || "").trim();
-  const date = String(body.date || "").trim();
+  const description = normalizeMovementDescription(body.description);
+  const date = validateIsoDate(body.date, "invalid_movement_date");
   const sourceKey = String(body.sourceKey || body.id || existingId || uuid()).trim();
   const movementId = String(body.id || existingId || sourceKey || uuid()).trim();
 
-  if (!amount || amount <= 0 || !categoryId || !description || !date) {
+  if (!categoryId || !description || !date || !sourceKey || !movementId || categoryId.length > 128 || sourceKey.length > 128 || movementId.length > 128) {
     const error = new Error("invalid_movement");
     error.statusCode = 400;
     throw error;
@@ -1743,17 +2035,26 @@ function collectUserBootstrap(userId) {
   };
 }
 
-function sendAuthCookie(response, sessionToken, expiresAt) {
-  setCookie(response, "pulso_session", sessionToken, {
+function sendAuthCookie(request, response, sessionToken, expiresAt) {
+  setCookie(response, SESSION_COOKIE_NAME, sessionToken, {
     expires: expiresAt,
+    maxAge: Math.floor((expiresAt.getTime() - Date.now()) / 1000),
+    secure: isSecureRequest(request),
   });
 }
 
-function createSession(userId, response) {
+function clearAuthCookie(request, response) {
+  clearCookie(response, SESSION_COOKIE_NAME, {
+    secure: isSecureRequest(request),
+  });
+}
+
+function createSession(userId, request, response) {
+  cleanupExpiredSessions();
   const token = crypto.randomBytes(32).toString("hex");
   const tokenHash = sha256(token);
   const createdAt = nowIso();
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
   statements.insertSession.run({
     id: uuid(),
     userId,
@@ -1762,20 +2063,24 @@ function createSession(userId, response) {
     lastSeenAt: createdAt,
     expiresAt: expiresAt.toISOString(),
   });
-  sendAuthCookie(response, token, expiresAt);
+  sendAuthCookie(request, response, token, expiresAt);
 }
 
-function registerUser(body, response) {
-  const email = normalizeEmail(body.email);
-  const password = String(body.password || "");
-  if (!email || !email.includes("@") || password.length < 8) {
-    sendJson(response, 400, { error: "invalid_credentials" });
+function registerUser(body, request, response) {
+  const checks = registerRateChecks(request);
+  if (enforceAuthRateLimit(response, checks)) return;
+  recordRateLimitAttempts(checks);
+
+  const credentials = validateAuthPayload(body, { requireStrongPassword: true });
+  if (!credentials) {
+    sendJson(response, 400, { error: "invalid_auth_request" });
     return;
   }
 
+  const { email, password } = credentials;
   const existing = statements.findUserByEmail.get(email);
   if (existing) {
-    sendJson(response, 409, { error: "email_in_use" });
+    sendJson(response, 400, { error: "registration_failed" });
     return;
   }
 
@@ -1801,25 +2106,34 @@ function registerUser(body, response) {
     throw error;
   }
 
-  createSession(userId, response);
+  createSession(userId, request, response);
   sendJson(response, 201, { user: serializeUser(statements.findUserById.get(userId)) });
 }
 
-function loginUser(body, response) {
-  const email = normalizeEmail(body.email);
-  const password = String(body.password || "");
-  if (!email || !password) {
+function loginUser(body, request, response) {
+  const ipChecks = loginRateChecks(request);
+  if (enforceAuthRateLimit(response, ipChecks)) return;
+
+  const credentials = validateAuthPayload(body);
+  if (!credentials) {
+    recordRateLimitAttempts(ipChecks);
     sendJson(response, 400, { error: "invalid_credentials" });
     return;
   }
 
+  const { email, password } = credentials;
+  const checks = loginRateChecks(request, email);
+  if (enforceAuthRateLimit(response, checks)) return;
+
   const user = statements.findUserByEmail.get(email);
   if (!user || !verifyPassword(password, user.password_salt, user.password_hash)) {
+    recordRateLimitAttempts(checks);
     sendJson(response, 401, { error: "invalid_credentials" });
     return;
   }
 
-  createSession(user.id, response);
+  checks.forEach((check) => clearRateLimit(check.key));
+  createSession(user.id, request, response);
   sendJson(response, 200, { user: serializeUser(statements.findUserById.get(user.id)) });
 }
 
@@ -1828,7 +2142,7 @@ function logoutUser(request, response) {
   if (token) {
     statements.deleteSessionByTokenHash.run(sha256(token));
   }
-  clearCookie(response, "pulso_session");
+  clearAuthCookie(request, response);
   sendJson(response, 200, { ok: true });
 }
 
@@ -1847,40 +2161,50 @@ function handleImport(request, response, context, body) {
     for (const type of ["income", "expense"]) {
       const list = Array.isArray(categories[type]) ? categories[type] : [];
       for (const categoryName of list) {
-        const existing = statements.findCategoryBySlug.get(userId, type, slugify(categoryName));
-        const category = ensureCategoryCapacity(userId, type, categoryName);
-        importedIds.set(`${type}:${normalizeName(categoryName)}`, category.id);
-        if (!existing) importedCategories += 1;
+        try {
+          const normalizedCategoryName = normalizeName(categoryName);
+          if (!normalizedCategoryName) continue;
+          const existing = statements.findCategoryBySlug.get(userId, type, slugify(normalizedCategoryName));
+          const category = ensureCategoryCapacity(userId, type, normalizedCategoryName);
+          importedIds.set(`${type}:${normalizedCategoryName}`, category.id);
+          if (!existing) importedCategories += 1;
+        } catch {
+          continue;
+        }
       }
     }
 
     for (const movement of movements) {
       if (!movement || typeof movement !== "object") continue;
-      const type = movement.type === "income" ? "income" : "expense";
-      const categoryName = normalizeName(movement.category || movement.categoryName || "outros");
-      const categoryKey = `${type}:${categoryName}`;
-      let categoryId = importedIds.get(categoryKey);
-      if (!categoryId) {
-        const category = ensureCategoryCapacity(userId, type, categoryName);
-        categoryId = category.id;
-        importedIds.set(categoryKey, categoryId);
+      try {
+        const type = movement.type === "income" ? "income" : "expense";
+        const categoryName = normalizeName(movement.category || movement.categoryName || "outros");
+        const categoryKey = `${type}:${categoryName}`;
+        let categoryId = importedIds.get(categoryKey);
+        if (!categoryId) {
+          const category = ensureCategoryCapacity(userId, type, categoryName);
+          categoryId = category.id;
+          importedIds.set(categoryKey, categoryId);
+        }
+
+        const sourceKey = String(movement.id || movement.sourceKey || "").trim();
+        if (!sourceKey) continue;
+        const already = statements.findMovementBySource.get(userId, sourceKey);
+        if (already) continue;
+
+        upsertMovement(userId, {
+          id: sourceKey,
+          sourceKey,
+          type,
+          amount: movement.amount,
+          categoryId,
+          description: movement.description,
+          date: movement.date,
+        });
+        importedMovements += 1;
+      } catch {
+        continue;
       }
-
-      const sourceKey = String(movement.id || movement.sourceKey || "").trim();
-      if (!sourceKey) continue;
-      const already = statements.findMovementBySource.get(userId, sourceKey);
-      if (already) continue;
-
-      upsertMovement(userId, {
-        id: sourceKey,
-        sourceKey,
-        type,
-        amount: movement.amount,
-        categoryId,
-        description: movement.description,
-        date: movement.date,
-      });
-      importedMovements += 1;
     }
 
     db.exec("COMMIT");
@@ -2313,14 +2637,16 @@ function serveStatic(request, response, pathname) {
       return;
     }
     response.writeHead(200, {
+      ...buildSecurityHeaders(),
       "Content-Type": mimeTypes[path.extname(normalized)] || "application/octet-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": staticCacheControlFor(normalized),
     });
     response.end(data);
   });
 }
 
 migrateCyclesForExistingUsers();
+cleanupExpiredSessions(true);
 
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${host}`);
@@ -2339,14 +2665,14 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (pathname === "/auth/register" && method === "POST") {
-      const body = await readJsonBody(request);
-      registerUser(body, response);
+      const body = await readJsonBody(request, AUTH_BODY_LIMIT_BYTES);
+      registerUser(body, request, response);
       return;
     }
 
     if (pathname === "/auth/login" && method === "POST") {
-      const body = await readJsonBody(request);
-      loginUser(body, response);
+      const body = await readJsonBody(request, AUTH_BODY_LIMIT_BYTES);
+      loginUser(body, request, response);
       return;
     }
 
@@ -2459,9 +2785,8 @@ const server = http.createServer(async (request, response) => {
 
     if (method === "OPTIONS") {
       response.writeHead(204, {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        ...buildSecurityHeaders(),
+        "Allow": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
       });
       response.end();
       return;
@@ -2470,9 +2795,11 @@ const server = http.createServer(async (request, response) => {
     serveStatic(request, response, pathname);
   } catch (error) {
     console.error(error);
-    sendJson(response, error.statusCode || 500, {
-      error: "internal_error",
-      message: error.message || "Unexpected error",
+    const statusCode = error.statusCode || 500;
+    const clientError = statusCode >= 400 && statusCode < 500;
+    sendJson(response, statusCode, {
+      error: clientError ? error.code || "request_failed" : "internal_error",
+      message: clientError ? error.message || "Request failed" : "Unexpected error",
     });
   }
 });

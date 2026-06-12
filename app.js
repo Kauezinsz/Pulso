@@ -466,7 +466,14 @@ function updateAuthShell() {
     elements.logoutButton.hidden = false;
     elements.logoutButton.setAttribute("aria-label", `Sair da conta${state.user?.email ? ` (${state.user.email})` : ""}`);
     elements.logoutButton.title = state.user?.email ? `Sair de ${state.user.email}` : "Sair da conta";
-    elements.logoutButton.querySelector("svg").innerHTML = '<path d="M10 17l5-5-5-5"></path><path d="M15 12H4"></path><path d="M20 4v16"></path>';
+    const icon = elements.logoutButton.querySelector("svg");
+    if (icon) {
+      icon.replaceChildren(
+        createSvgElement("path", { d: "M10 17l5-5-5-5" }),
+        createSvgElement("path", { d: "M15 12H4" }),
+        createSvgElement("path", { d: "M20 4v16" }),
+      );
+    }
   } else {
     elements.logoutButton.hidden = true;
   }
@@ -490,34 +497,30 @@ function formatFileSize(bytes) {
 
 function renderReceiptPreview(receipt) {
   if (!receipt) {
-    return `<div class="receipt-empty">
-      <strong>Sem comprovante</strong>
-      <span>Tire uma foto, escolha uma imagem ou anexe um PDF.</span>
-    </div>`;
+    return createElement("div", { className: "receipt-empty" }, [
+      createElement("strong", { text: "Sem comprovante" }),
+      createElement("span", { text: "Tire uma foto, escolha uma imagem ou anexe um PDF." }),
+    ]);
   }
 
   const isPdf = receipt.kind === "pdf" || receipt.mimeType === "application/pdf";
-  const label = escapeHtml(receipt.originalName || receipt.file?.name || "Comprovante");
+  const labelText = receipt.originalName || receipt.file?.name || "Comprovante";
   const size = receipt.file ? receipt.file.size : Number(receipt.size || 0);
   const sizeLabel = size ? formatFileSize(size) : "";
-  const url = resolveReceiptUrl(receipt.previewUrl || receipt.url || "");
+  const url = safeReceiptUrl(receipt.previewUrl || receipt.url || "");
 
-  return `
-    <div class="receipt-preview ${isPdf ? "pdf" : "image"}">
-      <div class="receipt-preview-media">
-        ${
-          isPdf
-            ? `<div class="receipt-pdf-mark" aria-hidden="true">PDF</div>`
-            : `<img src="${escapeHtml(url)}" alt="${label}" />`
-        }
-      </div>
-      <div class="receipt-preview-copy">
-        <strong>${label}</strong>
-        <span>${isPdf ? "Documento PDF" : "Imagem"}${sizeLabel ? ` · ${sizeLabel}` : ""}</span>
-      </div>
-    </div>`;
+  return createElement("div", { className: `receipt-preview ${isPdf ? "pdf" : "image"}` }, [
+    createElement("div", { className: "receipt-preview-media" }, [
+      isPdf
+        ? createElement("div", { className: "receipt-pdf-mark", text: "PDF", attrs: { "aria-hidden": "true" } })
+        : createElement("img", { attrs: { src: url, alt: labelText } }),
+    ]),
+    createElement("div", { className: "receipt-preview-copy" }, [
+      createElement("strong", { text: labelText }),
+      createElement("span", { text: `${isPdf ? "Documento PDF" : "Imagem"}${sizeLabel ? ` ? ${sizeLabel}` : ""}` }),
+    ]),
+  ]);
 }
-
 function openReceiptPicker(mode) {
   if (!elements.receiptInput || state.formType !== "expense") return;
   elements.receiptInput.value = "";
@@ -778,7 +781,7 @@ function openCurrentReceipt() {
         url: state.receiptDraft.previewUrl,
       }
     : state.receiptDraft.existing;
-  const url = resolveReceiptUrl(receipt?.url || "");
+  const url = safeReceiptUrl(receipt?.url || "");
   if (!url) return;
   window.open(url, "_blank", "noopener,noreferrer");
 }
@@ -802,32 +805,56 @@ function closeCategorySheet() {
 
 function renderCategoryList() {
   const categories = getCategoriesForType(state.formType);
-  elements.categorySheetContext.textContent = state.formType === "income" ? "Entrada" : "Saída";
-  elements.categoryList.innerHTML = `${categories
-    .map((category) => {
-      const selected = category === state.selectedCategory;
-      const custom = isCustomCategory(state.formType, category);
-      const removable = canDeleteCategory(category);
-      return `<div class="category-list-item ${selected ? "active" : ""} ${custom ? "custom" : ""}" role="option" aria-selected="${selected}">
-        <button class="category-main-action" type="button" data-category="${category}">
-          <span>${capitalize(category)}</span>
-          ${selected ? "<strong>Selecionada</strong>" : ""}
-        </button>
-        ${
-          custom || removable
-            ? `<div class="category-manage-actions">
-                ${custom ? `<button type="button" data-rename-category="${category}" aria-label="Renomear ${escapeHtml(category)}">Editar</button>` : ""}
-                ${removable ? `<button type="button" data-delete-category="${category}" aria-label="Excluir ${escapeHtml(category)}">Excluir</button>` : ""}
-              </div>`
-            : ""
-        }
-      </div>`;
-    })
-    .join("")}
-    <button class="category-list-item create" type="button" data-create-category>
-      <span>Criar nova categoria</span>
-      <strong>+</strong>
-    </button>`;
+  elements.categorySheetContext.textContent = state.formType === "income" ? "Entrada" : "Sa?da";
+  const fragment = document.createDocumentFragment();
+
+  for (const category of categories) {
+    const selected = category === state.selectedCategory;
+    const custom = isCustomCategory(state.formType, category);
+    const removable = canDeleteCategory(category);
+    const item = createElement("div", {
+      className: `category-list-item ${selected ? "active" : ""} ${custom ? "custom" : ""}`,
+      role: "option",
+      aria: { selected },
+    });
+
+    const mainAction = createElement("button", { className: "category-main-action", attrs: { type: "button" } }, [
+      createElement("span", { text: capitalize(category) }),
+    ]);
+    mainAction.dataset.category = category;
+    if (selected) {
+      mainAction.appendChild(createElement("strong", { text: "Selecionada" }));
+    }
+    item.appendChild(mainAction);
+
+    if (custom || removable) {
+      const manage = createElement("div", { className: "category-manage-actions" });
+      if (custom) {
+        const rename = createElement("button", { attrs: { type: "button" }, text: "Editar" });
+        rename.dataset.renameCategory = category;
+        rename.setAttribute("aria-label", `Renomear ${category}`);
+        manage.appendChild(rename);
+      }
+      if (removable) {
+        const remove = createElement("button", { attrs: { type: "button" }, text: "Excluir" });
+        remove.dataset.deleteCategory = category;
+        remove.setAttribute("aria-label", `Excluir ${category}`);
+        manage.appendChild(remove);
+      }
+      item.appendChild(manage);
+    }
+
+    fragment.appendChild(item);
+  }
+
+  const createButton = createElement("button", { className: "category-list-item create", attrs: { type: "button" } }, [
+    createElement("span", { text: "Criar nova categoria" }),
+    createElement("strong", { text: "+" }),
+  ]);
+  createButton.dataset.createCategory = "true";
+  fragment.appendChild(createButton);
+
+  elements.categoryList.replaceChildren(fragment);
 
   elements.categoryList.querySelectorAll("[data-category]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -844,11 +871,10 @@ function renderCategoryList() {
     button.addEventListener("click", () => confirmDeleteCategory(button.dataset.deleteCategory));
   });
 
-  elements.categoryList.querySelector("[data-create-category]").addEventListener("click", () => {
+  elements.categoryList.querySelector("[data-create-category]")?.addEventListener("click", () => {
     openCategoryEditor("create");
   });
 }
-
 async function saveNewCategory() {
   const category = normalizeCategoryName(elements.newCategoryName.value);
   const categories = getCategoriesForType(state.formType);
@@ -1159,11 +1185,10 @@ function renderSummary(totals, options = {}) {
     elements.behaviorCopy.textContent = "As saídas estão perto das entradas.";
   }
 
-  elements.recentList.innerHTML = renderMovementList(sortMovements(state.movements).slice(0, 4), {
-    empty: "Seu ciclo atual fica vivo assim que você adiciona a primeira movimentação.",
-  });
-  elements.quickInsights.innerHTML = buildInsights(totals).slice(0, 2).map(renderInsightCard).join("");
-
+  elements.recentList.replaceChildren(renderMovementList(sortMovements(state.movements).slice(0, 4), {
+    empty: "Seu ciclo atual fica vivo assim que voc? adiciona a primeira movimenta??o.",
+  }));
+  elements.quickInsights.replaceChildren(...buildInsights(totals).slice(0, 2).map(renderInsightCard));
   if (options.pulse) {
     elements.balance.closest(".balance-card").classList.remove("balance-updated");
     requestAnimationFrame(() => elements.balance.closest(".balance-card").classList.add("balance-updated"));
@@ -1175,11 +1200,10 @@ function renderHistory() {
     return state.activeFilter === "all" || movement.type === state.activeFilter;
   });
 
-  elements.historyList.innerHTML = renderMovementList(filtered, {
+  elements.historyList.replaceChildren(renderMovementList(filtered, {
     withActions: true,
-    empty: "Nenhum lançamento neste filtro do ciclo atual.",
-  });
-
+    empty: "Nenhum lan?amento neste filtro do ciclo atual.",
+  }));
   elements.historyList.querySelectorAll("[data-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const movement = state.movements.find((item) => item.id === button.dataset.edit);
@@ -1189,11 +1213,9 @@ function renderHistory() {
       }
     });
   });
-
   elements.historyList.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", () => deleteMovement(button.dataset.delete, button.closest(".movement-item")));
   });
-
   elements.historyList.querySelectorAll(".row-actions").forEach((details) => {
     const item = details.closest(".movement-item");
     const syncState = () => item?.classList.toggle("has-actions-open", details.open);
@@ -1222,19 +1244,18 @@ function renderAnalysis(totals) {
 
   if (!top) {
     elements.topCategory.textContent = state.analysisType === "expense" ? "Sem gastos ainda" : "Sem receitas ainda";
-    elements.topCategoryCopy.textContent = `Registre ${state.analysisType === "expense" ? "uma saída" : "uma entrada"} para o Pulso desenhar o ciclo.`;
-    elements.categoryBars.innerHTML = renderEmptyState("Análise limpa", "As categorias aparecem aqui com peso, proporção e leitura rápida.");
-    elements.categoryDonut.innerHTML = "";
+    elements.topCategoryCopy.textContent = `Registre ${state.analysisType === "expense" ? "uma sa?da" : "uma entrada"} para o Pulso desenhar o ciclo.`;
+    elements.categoryBars.replaceChildren(renderEmptyState("An?lise limpa", "As categorias aparecem aqui com peso, propor??o e leitura r?pida."));
+    elements.categoryDonut.replaceChildren();
     elements.donutCenter.textContent = "0%";
     return;
   }
-
   const hovered = grouped.find((item) => sameCategory(item.category, state.analysisHoveredCategory)) || null;
   const active = grouped.find((item) => sameCategory(item.category, state.activeAnalysisCategory)) || null;
   const focused = hovered || active || top;
   const movementLabel = state.analysisType === "expense" ? "saídas" : "entradas";
   updateAnalysisFocus(focused, typeTotal);
-  elements.categoryBars.innerHTML = grouped.map((item) => renderCategoryRow(item, typeTotal, movementLabel, sameCategory(item.category, state.activeAnalysisCategory))).join("");
+  elements.categoryBars.replaceChildren(...grouped.map((item) => renderCategoryRow(item, typeTotal, movementLabel, sameCategory(item.category, state.activeAnalysisCategory))));
   renderPieChart(grouped, typeTotal);
   syncAnalysisVisualState(grouped, typeTotal);
 }
@@ -1244,103 +1265,136 @@ function renderInsights(totals) {
   const [lead, ...rest] = insights;
   elements.insightHeadline.textContent = lead?.title || "Seu padrão aparece aqui.";
   elements.insightSubtitle.textContent = lead?.copy || "Adicione algumas movimentações para gerar leituras úteis neste ciclo.";
-  elements.insightsList.innerHTML = rest.length
-    ? rest.map(renderInsightCard).join("")
-    : renderEmptyState("Sem sinais extras", "Com mais registros, o Pulso compara ritmo, pequenos gastos e categorias.");
+  elements.insightsList.replaceChildren(...(rest.length
+    ? rest.map(renderInsightCard)
+    : [renderEmptyState("Sem sinais extras", "Com mais registros, o Pulso compara ritmo, pequenos gastos e categorias.")]) );
 }
 
 function renderMovementList(movements, options = {}) {
+  const fragment = document.createDocumentFragment();
   if (!movements.length) {
-    return renderEmptyState("Tudo calmo", options.empty || "O primeiro registro já muda a leitura.");
+    fragment.appendChild(renderEmptyState("Tudo calmo", options.empty || "O primeiro registro j? muda a leitura."));
+    return fragment;
   }
 
-  return movements
-    .map((movement) => {
-      const signal = movement.type === "income" ? "+" : "-";
-      const categoryName = movement.category || getCategoryNameById(movement.categoryId);
-      const meta = getCategoryMeta(categoryName);
-      const receiptAction = movement.receipt
-        ? `<a class="receipt-chip" href="${escapeHtml(resolveReceiptUrl(movement.receipt.url))}" target="_blank" rel="noopener noreferrer">${movement.receipt.kind === "pdf" ? "PDF" : "Comprovante"}</a>`
-        : "";
-      const actions = options.withActions
-        ? `<details class="row-actions">
-            <summary aria-label="Ações de ${escapeHtml(movement.description)}">
-              <span></span><span></span><span></span>
-            </summary>
-            <div class="action-menu" aria-label="Ações da movimentação">
-              <button class="row-action edit" type="button" data-edit="${movement.id}" aria-label="Editar ${escapeHtml(movement.description)}">Editar</button>
-              <button class="row-action delete" type="button" data-delete="${movement.id}" aria-label="Excluir ${escapeHtml(movement.description)}">Excluir</button>
-            </div>
-          </details>`
-        : "";
+  for (const movement of movements) {
+    const movementType = movement.type === "income" ? "income" : "expense";
+    const signal = movementType === "income" ? "+" : "-";
+    const categoryName = movement.category || getCategoryNameById(movement.categoryId);
+    const meta = getCategoryMeta(categoryName);
+    const categoryColor = safeCssColor(meta.color);
+    const article = createElement("article", { className: `movement-item ${movementType}`, style: { "--category-color": categoryColor } });
 
-      return `<article class="movement-item ${movement.type}" style="--category-color:${meta.color}">
-        <div class="movement-icon">${meta.icon}</div>
-        <div class="movement-main">
-          <strong>${escapeHtml(movement.description)}</strong>
-          <span>${capitalize(categoryName)} · ${formatDate(movement.date)}</span>
-        </div>
-        <div class="movement-side">
-          <span class="movement-value">${signal}${currency.format(movement.amount)}</span>
-          ${receiptAction ? `<div class="movement-receipt">${receiptAction}</div>` : ""}
-          ${actions}
-        </div>
-      </article>`;
-    })
-    .join("");
+    article.appendChild(createElement("div", { className: "movement-icon", text: meta.icon }));
+
+    article.appendChild(createElement("div", { className: "movement-main" }, [
+      createElement("strong", { text: movement.description }),
+      createElement("span", { text: `${capitalize(categoryName)} ? ${formatDate(movement.date)}` }),
+    ]));
+
+    const side = createElement("div", { className: "movement-side" });
+    side.appendChild(createElement("span", { className: "movement-value", text: `${signal}${currency.format(movement.amount)}` }));
+
+    const receiptUrl = movement.receipt ? safeReceiptUrl(movement.receipt.url) : "";
+    if (receiptUrl) {
+      const receiptLink = createElement("a", { className: "receipt-chip", text: movement.receipt.kind === "pdf" ? "PDF" : "Comprovante", attrs: { target: "_blank", rel: "noopener noreferrer" } });
+      receiptLink.href = receiptUrl;
+      side.appendChild(createElement("div", { className: "movement-receipt" }, [receiptLink]));
+    }
+
+    if (options.withActions) {
+      const details = createElement("details", { className: "row-actions" });
+      const summary = createElement("summary", { attrs: { "aria-label": `A??es de ${movement.description}` } }, [
+        createElement("span"),
+        createElement("span"),
+        createElement("span"),
+      ]);
+      details.appendChild(summary);
+      const menu = createElement("div", { className: "action-menu", attrs: { "aria-label": "A??es da movimenta??o" } });
+      const edit = createElement("button", { className: "row-action edit", attrs: { type: "button" }, text: "Editar" });
+      edit.dataset.edit = movement.id;
+      edit.setAttribute("aria-label", `Editar ${movement.description}`);
+      const del = createElement("button", { className: "row-action delete", attrs: { type: "button" }, text: "Excluir" });
+      del.dataset.delete = movement.id;
+      del.setAttribute("aria-label", `Excluir ${movement.description}`);
+      menu.append(edit, del);
+      details.appendChild(menu);
+      side.appendChild(details);
+    }
+
+    article.appendChild(side);
+    fragment.appendChild(article);
+  }
+
+  return fragment;
 }
-
 function renderCategoryRow(item, total, movementLabel, expanded = false) {
-  const share = Math.round((item.total / total) * 100);
+  const share = clampPercent(Math.round((item.total / total) * 100));
   const meta = getCategoryMeta(item.category);
-  const movements = expanded ? renderAnalysisMovements(item.category) : "";
-  return `<article class="category-row ${expanded ? "expanded" : ""}" data-category="${escapeHtml(item.category)}" style="--category-color:${meta.color}">
-    <button class="category-row-toggle" type="button" data-category-toggle="${escapeHtml(item.category)}" aria-expanded="${expanded}">
-      <div class="category-meta">
-        <span><i>${meta.icon}</i>${capitalize(item.category)}</span>
-        <strong>${currency.format(item.total)}</strong>
-      </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${share}%"></div></div>
-      <div class="category-values">
-        <span>${share}% das ${movementLabel}</span>
-        <span>${item.count} movimento${item.count === 1 ? "" : "s"}</span>
-      </div>
-    </button>
-    ${movements ? `<div class="category-expand" aria-label="Movimentações de ${escapeHtml(item.category)}">${movements}</div>` : ""}
-  </article>`;
-}
+  const categoryColor = safeCssColor(meta.color);
+  const article = createElement("article", {
+    className: `category-row ${expanded ? "expanded" : ""}`,
+    dataset: { category: item.category },
+    style: { "--category-color": categoryColor },
+  });
 
+  const button = createElement("button", { className: "category-row-toggle", attrs: { type: "button" } });
+  button.dataset.categoryToggle = item.category;
+  button.setAttribute("aria-expanded", String(expanded));
+  button.appendChild(createElement("div", { className: "category-meta" }, [
+    createElement("span", {}, [createElement("i", { text: meta.icon }), createElement("span", { text: capitalize(item.category) })]),
+    createElement("strong", { text: currency.format(item.total) }),
+  ]));
+  button.appendChild(createElement("div", { className: "bar-track" }, [
+    createElement("div", { className: "bar-fill", style: { width: `${share}%` } }),
+  ]));
+  button.appendChild(createElement("div", { className: "category-values" }, [
+    createElement("span", { text: `${share}% das ${movementLabel}` }),
+    createElement("span", { text: `${item.count} movimento${item.count === 1 ? "" : "s"}` }),
+  ]));
+  article.appendChild(button);
+
+  if (expanded) {
+    const expand = createElement("div", { className: "category-expand" });
+    expand.setAttribute("aria-label", `Movimenta??es de ${item.category}`);
+    expand.appendChild(renderAnalysisMovements(item.category));
+    article.appendChild(expand);
+  }
+
+  return article;
+}
 function renderPieChart(grouped, total) {
+  const svg = createSvgElement("svg", { viewBox: "0 0 120 120", role: "img", "aria-label": "Distribui??o por categoria" });
+
   if (grouped.length === 1) {
     const item = grouped[0];
-    const color = getCategoryColor(item.category, 0);
+    const color = safeCssColor(getCategoryColor(item.category, 0), "#2ee7ff");
     const radius = 34;
     const strokeWidth = 18;
     const circumference = (2 * Math.PI * radius).toFixed(3);
-
-    elements.categoryDonut.innerHTML = `<svg viewBox="0 0 120 120" role="img" aria-label="Distribuição por categoria">
-      <circle class="pie-track" cx="60" cy="60" r="${radius}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="${strokeWidth}" />
-      <circle class="pie-slice single" cx="60" cy="60" r="${radius}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-dasharray="${circumference}" stroke-dashoffset="0" data-category="${escapeHtml(item.category)}" data-index="0" />
-    </svg>`;
+    svg.appendChild(createSvgElement("circle", { class: "pie-track", cx: "60", cy: "60", r: String(radius), fill: "none", stroke: "rgba(255,255,255,0.08)", "stroke-width": String(strokeWidth) }));
+    svg.appendChild(createSvgElement("circle", { class: "pie-slice single", cx: "60", cy: "60", r: String(radius), fill: "none", stroke: color, "stroke-width": String(strokeWidth), "stroke-dasharray": circumference, "stroke-dashoffset": "0" }));
+    const slice = svg.lastElementChild;
+    slice.dataset.category = item.category;
+    slice.dataset.index = "0";
   } else {
     let startAngle = -90;
-    elements.categoryDonut.innerHTML = `<svg viewBox="0 0 120 120" role="img" aria-label="Distribuição por categoria">
-      ${grouped
-        .map((item, index) => {
-          const angle = (item.total / total) * 360;
-          const endAngle = startAngle + angle;
-          const color = getCategoryColor(item.category, index);
-          const path = describeDonutSlice(60, 60, 52, 34, startAngle, endAngle);
-          startAngle = endAngle;
-          return `<path class="pie-slice" d="${path}" fill="${color}" fill-rule="evenodd" data-category="${item.category}" data-index="${index}" />`;
-        })
-        .join("")}
-    </svg>`;
+    grouped.forEach((item, index) => {
+      const angle = (item.total / total) * 360;
+      const endAngle = startAngle + angle;
+      const color = safeCssColor(getCategoryColor(item.category, index), "#2ee7ff");
+      const path = describeDonutSlice(60, 60, 52, 34, startAngle, endAngle);
+      startAngle = endAngle;
+      const slice = createSvgElement("path", { class: "pie-slice", d: path, fill: color, "fill-rule": "evenodd" });
+      slice.dataset.category = item.category;
+      slice.dataset.index = String(index);
+      svg.appendChild(slice);
+    });
   }
 
+  elements.categoryDonut.replaceChildren(svg);
   bindAnalysisInteractions(grouped, total);
 }
-
 function bindAnalysisInteractions(grouped, total) {
   const activateHover = (category, pointerType = "mouse") => {
     if (!category) return;
@@ -1409,15 +1463,15 @@ function syncAnalysisVisualState(grouped, total) {
 
 function renderAnalysisMovements(category) {
   const movements = sortMovements(state.movements).filter((movement) => movement.type === state.analysisType && sameCategory(movement.category || getCategoryNameById(movement.categoryId), category));
+  const wrapper = createElement("div", { className: movements.length ? "category-expand-list" : "category-expand-empty" });
   if (!movements.length) {
-    return `<div class="category-expand-empty">${renderEmptyState("Sem movimentações", "Esta categoria ainda não tem lançamentos neste ciclo.")}</div>`;
+    wrapper.appendChild(renderEmptyState("Sem movimenta??es", "Esta categoria ainda n?o tem lan?amentos neste ciclo."));
+    return wrapper;
   }
 
-  return `<div class="category-expand-list">${renderMovementList(movements, {
-    empty: "Sem movimentações",
-  })}</div>`;
+  wrapper.appendChild(renderMovementList(movements, { empty: "Sem movimenta??es" }));
+  return wrapper;
 }
-
 function updateAnalysisFocus(item, total) {
   const share = Math.round((item.total / total) * 100);
   const typeLabel = state.analysisType === "expense" ? "saídas" : "entradas";
@@ -1427,21 +1481,20 @@ function updateAnalysisFocus(item, total) {
 }
 
 function renderInsightCard(insight) {
-  return `<article class="insight-card ${insight.tone}">
-    <span class="insight-badge">${insight.badge}</span>
-    <strong>${insight.title}</strong>
-    <p>${insight.copy}</p>
-  </article>`;
+  const tone = safeClassToken(insight?.tone, ["impact", "alert", "good", "soft"], "soft");
+  return createElement("article", { className: `insight-card ${tone}` }, [
+    createElement("span", { className: "insight-badge", text: insight?.badge || "" }),
+    createElement("strong", { text: insight?.title || "" }),
+    createElement("p", { text: insight?.copy || "" }),
+  ]);
 }
-
 function renderEmptyState(title, copy) {
-  return `<div class="empty-state">
-    <span></span>
-    <strong>${title}</strong>
-    <p>${copy}</p>
-  </div>`;
+  return createElement("div", { className: "empty-state" }, [
+    createElement("span", { attrs: { "aria-hidden": "true" } }),
+    createElement("strong", { text: title }),
+    createElement("p", { text: copy }),
+  ]);
 }
-
 function buildInsights(totals) {
   const grouped = groupExpensesByCategory();
   const top = grouped[0];
@@ -1588,7 +1641,7 @@ function buildDonutGradient(grouped, total) {
   const slices = grouped.map((item) => {
     const degrees = total ? (item.total / total) * 360 : 0;
     const end = start + degrees;
-    const slice = `${getCategoryMeta(item.category).color} ${start}deg ${end}deg`;
+    const slice = `${safeCssColor(getCategoryMeta(item.category).color)} ${start}deg ${end}deg`;
     start = end;
     return slice;
   });
@@ -1770,11 +1823,16 @@ function categoryIcon(category) {
 }
 
 function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  const text = toSafeString(value);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function toSafeString(value) {
+  return value === null || value === undefined ? "" : String(value);
 }
 
 function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (char) => {
+  return toSafeString(value).replace(/[&<>"']/g, (char) => {
     return {
       "&": "&amp;",
       "<": "&lt;",
@@ -1783,6 +1841,89 @@ function escapeHtml(value) {
       "'": "&#039;",
     }[char];
   });
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
+}
+
+function appendChildren(node, children = []) {
+  for (const child of children.flat(Infinity)) {
+    if (child === null || child === undefined || child === false) continue;
+    if (typeof child === "string" || typeof child === "number") {
+      node.appendChild(document.createTextNode(String(child)));
+      continue;
+    }
+    node.appendChild(child);
+  }
+  return node;
+}
+
+function createElement(tagName, options = {}, children = []) {
+  const element = document.createElement(tagName);
+  if (options.className) element.className = options.className;
+  if (options.text !== undefined) element.textContent = options.text;
+  if (options.role) element.setAttribute("role", options.role);
+  if (options.aria) {
+    for (const [key, value] of Object.entries(options.aria)) {
+      element.setAttribute(`aria-${key}`, String(value));
+    }
+  }
+  if (options.attrs) {
+    for (const [key, value] of Object.entries(options.attrs)) {
+      if (value === null || value === undefined) continue;
+      element.setAttribute(key, String(value));
+    }
+  }
+  if (options.dataset) {
+    for (const [key, value] of Object.entries(options.dataset)) {
+      if (value === null || value === undefined) continue;
+      element.dataset[key] = String(value);
+    }
+  }
+  if (options.style) {
+    for (const [key, value] of Object.entries(options.style)) {
+      if (value === null || value === undefined || value === "") continue;
+      element.style.setProperty(key, String(value));
+    }
+  }
+  appendChildren(element, children);
+  return element;
+}
+
+function createSvgElement(tagName, attrs = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tagName);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === null || value === undefined || value === "") continue;
+    element.setAttribute(key, String(value));
+  }
+  return element;
+}
+
+function safeClassToken(value, allowed, fallback = "") {
+  const text = toSafeString(value);
+  return allowed.includes(text) ? text : fallback;
+}
+
+function clampPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.min(Math.max(number, 0), 100);
+}
+
+function safeCssColor(value, fallback = "#8aa1b8") {
+  const text = toSafeString(value).trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(text)) return text;
+  if (/^rgba?\(\s*(?:\d{1,3}\s*,\s*){2}\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i.test(text)) return text;
+  return fallback;
+}
+
+function safeReceiptUrl(url) {
+  const resolved = resolveReceiptUrl(url);
+  if (!resolved) return "";
+  if (/^(?:javascript|data|vbscript):/i.test(resolved)) return "";
+  if (/^(?:blob:|https?:\/\/|\/(?!\/)|\.\/|\.\.\/)/i.test(resolved)) return resolved;
+  return "";
 }
 
 function getAppBasePath() {
@@ -1857,10 +1998,39 @@ function clearAuthMessage() {
 function authErrorMessage(error) {
   if (!error) return "Nao foi possivel continuar.";
   if (error.code === "email_in_use") return "Esse e-mail ja esta em uso.";
+  if (error.code === "registration_failed") return "Nao foi possivel criar a conta com esses dados.";
+  if (error.code === "invalid_auth_request") return "Revise o e-mail e a senha para continuar.";
   if (error.code === "invalid_credentials") return "E-mail ou senha invalidos.";
   if (error.code === "unauthorized") return "Sua sessao expirou. Entre novamente.";
+  if (error.code === "too_many_requests") return "Muitas tentativas. Aguarde um pouco e tente novamente.";
+  if (error.code === "payload_too_large") return "Os dados enviados sao grandes demais.";
+  if (error.code === "invalid_json") return "Nao foi possivel processar esses dados.";
   if (error.code === "network_error") return "Não conseguimos conectar ao servidor.";
   if (error.code === "insufficient_balance") return "Saldo insuficiente para concluir esta conta.";
+  if (error.code === "invalid_category") return "Revise o nome da categoria.";
+  if (error.code === "category_exists") return "Essa categoria já existe para este tipo.";
+  if (error.code === "category_not_found") return "Categoria não encontrada.";
+  if (error.code === "category_protected") return "Essa categoria não pode ser alterada.";
+  if (error.code === "category_in_use") return "Há lançamentos utilizando esta categoria.";
+  if (error.code === "category_type_mismatch") return "Categoria incompatível com esse tipo de lançamento.";
+  if (error.code === "invalid_movement") return "Revise os campos da movimentação.";
+  if (error.code === "invalid_movement_date") return "Use uma data válida para o lançamento.";
+  if (error.code === "movement_not_found") return "Movimentação não encontrada.";
+  if (error.code === "cycle_closed") return "Este ciclo está fechado e não aceita alterações.";
+  if (error.code === "invalid_goal") return "Revise os campos da meta.";
+  if (error.code === "invalid_goal_amount") return "Digite um valor válido para a meta.";
+  if (error.code === "goal_exists") return "Essa meta já existe neste ciclo.";
+  if (error.code === "goal_not_found") return "Meta não encontrada.";
+  if (error.code === "goal_target_too_low") return "O alvo não pode ficar abaixo do valor já guardado.";
+  if (error.code === "goal_insufficient_saved") return "Não há valor suficiente guardado nessa meta.";
+  if (error.code === "invalid_commitment") return "Revise os campos do compromisso.";
+  if (error.code === "invalid_commitment_due_date") return "Use uma data de vencimento válida.";
+  if (error.code === "commitment_exists") return "Esse compromisso já existe.";
+  if (error.code === "commitment_not_found") return "Compromisso não encontrado.";
+  if (error.code === "receipt_not_allowed") return "Comprovante só pode ser anexado em saídas.";
+  if (error.code === "receipt_not_found") return "Comprovante não encontrado.";
+  if (error.code === "invalid_receipt_type") return "Envie uma imagem JPG, PNG, WEBP ou um PDF.";
+  if (error.code === "receipt_too_large") return "O arquivo do comprovante excede o limite permitido.";
   return error.message || "Nao foi possivel continuar.";
 }
 
@@ -2142,16 +2312,34 @@ function resolveGoalAccent(goal) {
 function renderGoalAccentOptions(selectedAccent = defaultGoalAccent) {
   if (!elements.goalAccentOptions) return;
   const selected = normalizeGoalAccent(selectedAccent, defaultGoalAccent) || defaultGoalAccent;
-  elements.goalAccentOptions.innerHTML = goalAccentOrder.map((key) => {
+  const fragment = document.createDocumentFragment();
+
+  for (const key of goalAccentOrder) {
     const theme = goalAccentThemes[key];
     const active = key === selected;
-    return `<button class="goal-accent-option ${active ? "active" : ""}" type="button" data-goal-accent="${key}" aria-pressed="${active ? "true" : "false"}" style="--goal-accent:${theme.color};--goal-accent-soft:${theme.soft};--goal-accent-faint:${theme.faint};--goal-accent-glow:${theme.glow};--goal-accent-border:${theme.border};">
-      <span class="goal-accent-swatch" aria-hidden="true"></span>
-      <span class="goal-accent-label">${theme.label}</span>
-    </button>`;
-  }).join("");
-}
+    const style = {
+      "--goal-accent": theme.color,
+      "--goal-accent-soft": theme.soft,
+      "--goal-accent-faint": theme.faint,
+      "--goal-accent-glow": theme.glow,
+      "--goal-accent-border": theme.border,
+    };
+    const button = createElement("button", {
+      className: `goal-accent-option ${active ? "active" : ""}`,
+      attrs: { type: "button" },
+      aria: { pressed: active ? "true" : "false" },
+      dataset: { goalAccent: key },
+      style,
+    });
+    button.append(
+      createElement("span", { className: "goal-accent-swatch", attrs: { "aria-hidden": "true" } }),
+      createElement("span", { className: "goal-accent-label", text: theme.label }),
+    );
+    fragment.appendChild(button);
+  }
 
+  elements.goalAccentOptions.replaceChildren(fragment);
+}
 function setGoalAccent(accent) {
   const key = normalizeGoalAccent(accent, defaultGoalAccent) || defaultGoalAccent;
   state.goalAccent = key;
@@ -2293,7 +2481,7 @@ function syncReceiptPanel() {
         ? "Comprovante marcado para remoção."
         : "Adicione uma imagem ou PDF ao lançamento.";
 
-  elements.receiptPreview.innerHTML = renderReceiptPreview(activeReceipt);
+  elements.receiptPreview.replaceChildren(renderReceiptPreview(activeReceipt));
 
   const hasReceipt = Boolean(activeReceipt);
   elements.receiptOpen.hidden = !hasReceipt;
@@ -2613,17 +2801,23 @@ function setActiveTab(tab) {
 function renderSectionSwitcherPanel() {
   if (!elements.sectionSwitcherPanel) return;
 
-  elements.sectionSwitcherPanel.innerHTML = sectionSwitcherItems
-    .map((item) => `
-      <button class="section-switcher-option" type="button" data-mobile-tab="${item.tab}">
-        <span class="section-switcher-option-mark" aria-hidden="true">${getSectionSwitcherIcon(item.tab)}</span>
-        <span class="section-switcher-option-copy">
-          <strong>${item.label}</strong>
-          <small>${item.copy}</small>
-        </span>
-      </button>
-    `)
-    .join("");
+  const fragment = document.createDocumentFragment();
+  for (const item of sectionSwitcherItems) {
+    const button = createElement("button", {
+      className: "section-switcher-option",
+      attrs: { type: "button" },
+      dataset: { mobileTab: item.tab },
+    });
+    button.appendChild(createElement("span", { className: "section-switcher-option-mark", attrs: { "aria-hidden": "true" } }, [
+      createSectionSwitcherIcon(item.tab),
+    ]));
+    button.appendChild(createElement("span", { className: "section-switcher-option-copy" }, [
+      createElement("strong", { text: item.label }),
+      createElement("small", { text: item.copy }),
+    ]));
+    fragment.appendChild(button);
+  }
+  elements.sectionSwitcherPanel.replaceChildren(fragment);
 
   elements.sectionSwitcherPanel.querySelectorAll("[data-mobile-tab]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2639,7 +2833,7 @@ function syncSectionSwitcher(tab = state.activeTab) {
   elements.sectionSwitcherLabel.textContent = current?.label || "Seção";
   elements.sectionSwitcherCopy.textContent = current?.copy || periodLabel(tab);
   if (elements.sectionSwitcherMark) {
-    elements.sectionSwitcherMark.innerHTML = getSectionSwitcherIcon(tab);
+    elements.sectionSwitcherMark.replaceChildren(createSectionSwitcherIcon(tab));
   }
   elements.sectionSwitcher.setAttribute("aria-expanded", String(state.sectionSwitcherOpen));
   elements.sectionSwitcherPanel.classList.toggle("open", state.sectionSwitcherOpen);
@@ -2650,69 +2844,64 @@ function syncSectionSwitcher(tab = state.activeTab) {
   });
 }
 
-function getSectionSwitcherIcon(tab) {
+function createSectionSwitcherIcon(tab) {
   const icons = {
-    summary: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 11.2 12 5l8 6.2" />
-        <path d="M6.5 10.6V19h11V10.6" />
-        <path d="M10 19v-4h4v4" />
-      </svg>`,
-    history: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8 6h12" />
-        <path d="M8 12h12" />
-        <path d="M8 18h12" />
-        <path d="M4 6h.01" />
-        <path d="M4 12h.01" />
-        <path d="M4 18h.01" />
-      </svg>`,
-    analysis: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 19V5" />
-        <path d="M4 19h16" />
-        <path d="M8 16v-4" />
-        <path d="M12 16V8" />
-        <path d="M16 16v-6" />
-      </svg>`,
-    commitments: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8 6h11" />
-        <path d="M8 12h11" />
-        <path d="M8 18h11" />
-        <path d="M4 6h.01" />
-        <path d="M4 12h.01" />
-        <path d="M4 18h.01" />
-      </svg>`,
-    insights: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3v3" />
-        <path d="M18.4 5.6 16.3 7.7" />
-        <path d="M21 12h-3" />
-        <path d="M6 12H3" />
-        <path d="M7.7 7.7 5.6 5.6" />
-        <path d="M9 18h6" />
-        <path d="M10 21h4" />
-        <path d="M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" />
-      </svg>`,
-    goals: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 2v3" />
-        <path d="M12 19v3" />
-        <path d="M4.9 4.9 7 7" />
-        <path d="M17 17l2.1 2.1" />
-        <path d="M2 12h3" />
-        <path d="M19 12h3" />
-        <circle cx="12" cy="12" r="5" />
-      </svg>`,
-    cycles: `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3 12a9 9 0 1 0 3-6.7" />
-        <path d="M3 4v6h6" />
-        <path d="M12 8v5l3 2" />
-      </svg>`,
+    summary: [
+      createSvgElement("path", { d: "M4 11.2 12 5l8 6.2" }),
+      createSvgElement("path", { d: "M6.5 10.6V19h11V10.6" }),
+      createSvgElement("path", { d: "M10 19v-4h4v4" }),
+    ],
+    history: [
+      createSvgElement("path", { d: "M8 6h12" }),
+      createSvgElement("path", { d: "M8 12h12" }),
+      createSvgElement("path", { d: "M8 18h12" }),
+      createSvgElement("path", { d: "M4 6h.01" }),
+      createSvgElement("path", { d: "M4 12h.01" }),
+      createSvgElement("path", { d: "M4 18h.01" }),
+    ],
+    analysis: [
+      createSvgElement("path", { d: "M4 19V5" }),
+      createSvgElement("path", { d: "M4 19h16" }),
+      createSvgElement("path", { d: "M8 16v-4" }),
+      createSvgElement("path", { d: "M12 16V8" }),
+      createSvgElement("path", { d: "M16 16v-6" }),
+    ],
+    commitments: [
+      createSvgElement("path", { d: "M8 6h11" }),
+      createSvgElement("path", { d: "M8 12h11" }),
+      createSvgElement("path", { d: "M8 18h11" }),
+      createSvgElement("path", { d: "M4 6h.01" }),
+      createSvgElement("path", { d: "M4 12h.01" }),
+      createSvgElement("path", { d: "M4 18h.01" }),
+    ],
+    insights: [
+      createSvgElement("path", { d: "M12 3v3" }),
+      createSvgElement("path", { d: "M18.4 5.6 16.3 7.7" }),
+      createSvgElement("path", { d: "M21 12h-3" }),
+      createSvgElement("path", { d: "M6 12H3" }),
+      createSvgElement("path", { d: "M7.7 7.7 5.6 5.6" }),
+      createSvgElement("path", { d: "M9 18h6" }),
+      createSvgElement("path", { d: "M10 21h4" }),
+      createSvgElement("path", { d: "M8 14a4 4 0 1 1 8 0c0 1.5-.8 2.3-1.6 3H9.6C8.8 16.3 8 15.5 8 14Z" }),
+    ],
+    goals: [
+      createSvgElement("path", { d: "M12 2v3" }),
+      createSvgElement("path", { d: "M12 19v3" }),
+      createSvgElement("path", { d: "M4.9 4.9 7 7" }),
+      createSvgElement("path", { d: "M17 17l2.1 2.1" }),
+      createSvgElement("path", { d: "M2 12h3" }),
+      createSvgElement("path", { d: "M19 12h3" }),
+      createSvgElement("circle", { cx: "12", cy: "12", r: "5" }),
+    ],
+    cycles: [
+      createSvgElement("path", { d: "M3 12a9 9 0 1 0 3-6.7" }),
+      createSvgElement("path", { d: "M3 4v6h6" }),
+      createSvgElement("path", { d: "M12 8v5l3 2" }),
+    ],
   };
-  return icons[tab] || icons.summary;
+  const svg = createSvgElement("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" });
+  svg.append(...(icons[tab] || icons.summary));
+  return svg;
 }
 
 function openSectionSwitcher() {
@@ -3310,88 +3499,110 @@ function renderCommitments() {
     elements.commitmentsFeedback.classList.remove("show");
   }
 
-  elements.commitmentPendingList.innerHTML = pending.length
-    ? renderCommitmentSections(pendingBuckets)
-    : renderEmptyState("Nada pendente", "Os compromissos a pagar e a receber aparecem aqui antes de virar movimento.");
-  elements.commitmentDoneList.innerHTML = done.length
-    ? done.map((item) => renderCommitmentCard(item)).join("")
-    : renderEmptyState("Nada concluído", "Quando você conclui um compromisso, ele muda de lado e pode ser lançado no histórico.");
+  elements.commitmentPendingList.replaceChildren(
+    pending.length
+      ? renderCommitmentSections(pendingBuckets)
+      : renderEmptyState("Nada pendente", "Os compromissos a pagar e a receber aparecem aqui antes de virar movimento."),
+  );
+  elements.commitmentDoneList.replaceChildren(
+    ...(done.length
+      ? done.map((item) => renderCommitmentCard(item))
+      : [renderEmptyState("Nada conclu?do", "Quando voc? conclui um compromisso, ele muda de lado e pode ser lan?ado no hist?rico.")]),
+  );
 }
 
 function renderCommitmentSections(buckets) {
   const sections = [
-    { key: "overdue", title: "Atrasados", copy: "Já passaram do vencimento." },
+    { key: "overdue", title: "Atrasados", copy: "J? passaram do vencimento." },
     { key: "today", title: "Vencendo hoje", copy: "Itens para resolver ainda hoje." },
-    { key: "week", title: "Próximos 7 dias", copy: "Planejamento de curto prazo." },
-    { key: "later", title: "Mais à frente", copy: "Compromissos já com data definida." },
+    { key: "week", title: "Pr?ximos 7 dias", copy: "Planejamento de curto prazo." },
+    { key: "later", title: "Mais ? frente", copy: "Compromissos j? com data definida." },
     { key: "nodate", title: "Sem vencimento", copy: "Planejado, mas ainda sem data." },
   ];
+  const fragment = document.createDocumentFragment();
 
-  return sections
-    .map((section) => {
-      const items = buckets[section.key] || [];
-      if (!items.length) return "";
-      return `<section class="commitment-group">
-        <header class="commitment-group-header">
-          <div>
-            <strong>${section.title}</strong>
-            <p>${section.copy}</p>
-          </div>
-          <span>${items.length} item${items.length === 1 ? "" : "s"}</span>
-        </header>
-        <div class="commitment-group-list">
-          ${items.map((item) => renderCommitmentCard(item)).join("")}
-        </div>
-      </section>`;
-    })
-    .join("");
+  for (const section of sections) {
+    const items = buckets[section.key] || [];
+    if (!items.length) continue;
+    const group = createElement("section", { className: "commitment-group" });
+    const header = createElement("header", { className: "commitment-group-header" });
+    header.appendChild(createElement("div", {}, [
+      createElement("strong", { text: section.title }),
+      createElement("p", { text: section.copy }),
+    ]));
+    header.appendChild(createElement("span", { text: `${items.length} item${items.length === 1 ? "" : "s"}` }));
+    group.appendChild(header);
+
+    const list = createElement("div", { className: "commitment-group-list" });
+    for (const item of items) {
+      list.appendChild(renderCommitmentCard(item));
+    }
+    group.appendChild(list);
+    fragment.appendChild(group);
+  }
+
+  return fragment;
 }
-
 function renderCommitmentCard(commitment) {
-  const isPending = commitment.status === "pending";
+  const commitmentType = commitment.type === "receivable" ? "receivable" : "payable";
+  const commitmentStatus = commitment.status === "done" ? "done" : "pending";
+  const isPending = commitmentStatus === "pending";
   const isLaunched = Boolean(commitment.convertedMovementId);
-  const typeLabel = commitment.type === "receivable" ? "A receber" : "A pagar";
+  const typeLabel = commitmentType === "receivable" ? "A receber" : "A pagar";
   const statusLabel = isPending ? "Planejado" : "Realizado";
   const dueState = getCommitmentDueState(commitment);
   const pendingDelete = state.pendingDeleteCommitment === commitment.id;
   const pendingLaunch = state.pendingLaunchCommitment === commitment.id;
-  const canLaunch = commitment.status === "done" && !isLaunched;
-  const launchLabel = pendingLaunch ? "Confirmar lançamento" : "Lançar no histórico";
+  const canLaunch = commitmentStatus === "done" && !isLaunched;
+  const launchLabel = pendingLaunch ? "Confirmar lan?amento" : "Lan?ar no hist?rico";
   const dueBadge = dueState.label || "Sem vencimento";
-  const dueClass = dueState.className ? ` ${dueState.className}` : "";
+  const dueClassName = safeClassToken(dueState.className, ["no-date", "overdue", "due-today", "due-soon", "future"], "");
+  const dueBadgeTone = safeClassToken(dueState.badgeTone, ["muted", "danger", "warning", "info"], "muted");
+  const card = createElement("article", { className: `commitment-card ${commitmentType} ${commitmentStatus} ${isLaunched ? "launched" : ""} ${pendingDelete ? "pending-delete" : ""}${dueClassName ? ` ${dueClassName}` : ""}` });
 
-  return `<article class="commitment-card ${commitment.type} ${commitment.status} ${isLaunched ? "launched" : ""} ${pendingDelete ? "pending-delete" : ""}${dueClass}">
-    <div class="commitment-head">
-      <div class="commitment-copy">
-        <div class="commitment-badges">
-          <span class="commitment-badge type">${typeLabel}</span>
-          <span class="commitment-badge status ${isPending ? "pending" : "done"}">${statusLabel}</span>
-          <span class="commitment-badge due ${dueState.badgeTone}">${dueBadge}</span>
-          ${isLaunched ? `<span class="commitment-badge launch">Lançado</span>` : ""}
-        </div>
-        <strong>${escapeHtml(commitment.description)}</strong>
-        <p>${commitment.type === "receivable" ? "Valor a entrar" : "Valor a sair"} ${currency.format(commitment.amount)}${commitment.dueDate ? ` · ${formatOptionalDate(commitment.dueDate)}` : " · Sem vencimento"}</p>
-      </div>
-      <div class="commitment-value">
-        <strong>${currency.format(commitment.amount)}</strong>
-        <span>${commitment.type === "receivable" ? "Entrada prevista" : "Saída prevista"}</span>
-      </div>
-    </div>
-    <div class="commitment-meta">
-      <span>${commitment.dueDate ? `Prazo ${formatOptionalDate(commitment.dueDate)}` : "Sem data definida"}</span>
-      <span>${isLaunched ? "Já virou movimento real" : "Ainda não entrou no histórico"}</span>
-    </div>
-    <div class="commitment-actions">
-      <button class="secondary-action compact commitment-action" type="button" data-commitment-edit="${commitment.id}">Editar</button>
-      <button class="secondary-action compact commitment-action" type="button" data-commitment-toggle="${commitment.id}">${isPending ? "Concluir e lançar" : "Reabrir"}</button>
-      ${canLaunch ? `<button class="secondary-action compact commitment-action ${pendingLaunch ? "pending-confirm" : ""}" type="button" data-commitment-launch="${commitment.id}">${launchLabel}</button>` : ""}
-    </div>
-    <div class="commitment-meta-actions">
-      <button class="text-button ${pendingDelete ? "pending" : ""}" type="button" data-commitment-delete="${commitment.id}">${pendingDelete ? "Confirmar" : "Excluir"}</button>
-    </div>
-  </article>`;
+  const head = createElement("div", { className: "commitment-head" });
+  const copy = createElement("div", { className: "commitment-copy" });
+  const badges = createElement("div", { className: "commitment-badges" }, [
+    createElement("span", { className: "commitment-badge type", text: typeLabel }),
+    createElement("span", { className: `commitment-badge status ${isPending ? "pending" : "done"}`, text: statusLabel }),
+    createElement("span", { className: `commitment-badge due ${dueBadgeTone}`, text: dueBadge }),
+  ]);
+  if (isLaunched) badges.appendChild(createElement("span", { className: "commitment-badge launch", text: "Lan?ado" }));
+  copy.appendChild(badges);
+  copy.appendChild(createElement("strong", { text: commitment.description }));
+  copy.appendChild(createElement("p", { text: `${commitmentType === "receivable" ? "Valor a entrar" : "Valor a sair"} ${currency.format(commitment.amount)}${commitment.dueDate ? ` ? ${formatOptionalDate(commitment.dueDate)}` : " ? Sem vencimento"}` }));
+  head.appendChild(copy);
+  head.appendChild(createElement("div", { className: "commitment-value" }, [
+    createElement("strong", { text: currency.format(commitment.amount) }),
+    createElement("span", { text: commitmentType === "receivable" ? "Entrada prevista" : "Sa?da prevista" }),
+  ]));
+  card.appendChild(head);
+  card.appendChild(createElement("div", { className: "commitment-meta" }, [
+    createElement("span", { text: commitment.dueDate ? `Prazo ${formatOptionalDate(commitment.dueDate)}` : "Sem data definida" }),
+    createElement("span", { text: isLaunched ? "J? virou movimento real" : "Ainda n?o entrou no hist?rico" }),
+  ]));
+
+  const actions = createElement("div", { className: "commitment-actions" });
+  const edit = createElement("button", { className: "secondary-action compact commitment-action", attrs: { type: "button" }, text: "Editar" });
+  edit.dataset.commitmentEdit = commitment.id;
+  const toggle = createElement("button", { className: "secondary-action compact commitment-action", attrs: { type: "button" }, text: isPending ? "Concluir e lan?ar" : "Reabrir" });
+  toggle.dataset.commitmentToggle = commitment.id;
+  actions.append(edit, toggle);
+  if (canLaunch) {
+    const launch = createElement("button", { className: `secondary-action compact commitment-action ${pendingLaunch ? "pending-confirm" : ""}`, attrs: { type: "button" }, text: launchLabel });
+    launch.dataset.commitmentLaunch = commitment.id;
+    actions.appendChild(launch);
+  }
+  card.appendChild(actions);
+
+  const metaActions = createElement("div", { className: "commitment-meta-actions" });
+  const del = createElement("button", { className: `text-button ${pendingDelete ? "pending" : ""}`, attrs: { type: "button" }, text: pendingDelete ? "Confirmar" : "Excluir" });
+  del.dataset.commitmentDelete = commitment.id;
+  metaActions.appendChild(del);
+  card.appendChild(metaActions);
+
+  return card;
 }
-
 function getCommitmentDueState(commitment) {
   if (!commitment?.dueDate) {
     return { label: "Sem vencimento", className: "no-date", badgeTone: "muted" };
@@ -3476,41 +3687,69 @@ function renderGoals(totals) {
     elements.goalsFeedback.classList.remove("show");
   }
 
-  elements.goalList.innerHTML = state.goals.length
-    ? state.goals.map((goal) => renderGoalCard(goal, available)).join("")
-    : renderEmptyState("Nenhuma meta ainda", "Crie um cofrinho para separar parte do saldo do ciclo.");
+  elements.goalList.replaceChildren(
+    ...(state.goals.length
+      ? state.goals.map((goal) => renderGoalCard(goal, available))
+      : [renderEmptyState("Nenhuma meta ainda", "Crie um cofrinho para separar parte do saldo do ciclo.")]),
+  );
 }
 
 function renderGoalCard(goal, availableBalance) {
   const progress = goal.targetAmount > 0 ? Math.round((goal.savedAmount / goal.targetAmount) * 100) : 0;
-  const fill = Math.min(progress, 100);
+  const fill = clampPercent(progress);
   const complete = goal.savedAmount >= goal.targetAmount;
   const pending = state.pendingDeleteGoal === goal.id;
   const accentKey = resolveGoalAccent(goal);
   const accent = getGoalAccentTheme(accentKey);
+  const style = {
+    "--goal-accent": accent.color,
+    "--goal-accent-soft": accent.soft,
+    "--goal-accent-faint": accent.faint,
+    "--goal-accent-glow": accent.glow,
+    "--goal-accent-border": accent.border,
+    "--goal-accent-progress": accent.progress,
+  };
+  const card = createElement("article", {
+    className: `goal-card ${complete ? "complete" : ""} ${pending ? "pending-delete" : ""}`,
+    dataset: { goalAccent: accentKey },
+    style,
+  });
 
-  return `<article class="goal-card ${complete ? "complete" : ""} ${pending ? "pending-delete" : ""}" data-goal-accent="${accentKey}" style="--goal-accent:${accent.color};--goal-accent-soft:${accent.soft};--goal-accent-faint:${accent.faint};--goal-accent-glow:${accent.glow};--goal-accent-border:${accent.border};--goal-accent-progress:${accent.progress};">
-    <div class="goal-head">
-      <div class="goal-copy">
-        <span class="mini-label goal-accent-pill">Meta</span>
-        <strong>${escapeHtml(capitalize(goal.name))}</strong>
-        <p>Guardado ${currency.format(goal.savedAmount)} · Alvo ${currency.format(goal.targetAmount)}</p>
-      </div>
-      <div class="goal-progress-copy">
-        <strong>${progress >= 100 ? "100%+" : `${progress}%`}</strong>
-        <span>${complete ? "Concluída" : "Em andamento"}</span>
-      </div>
-    </div>
-    <div class="goal-track" aria-hidden="true"><div class="goal-fill" style="width:${fill}%"></div></div>
-    <div class="goal-actions">
-      <button class="secondary-action compact goal-action" type="button" data-goal-save="${goal.id}" ${availableBalance <= 0 ? "disabled" : ""}>Guardar</button>
-      <button class="secondary-action compact goal-action" type="button" data-goal-remove="${goal.id}" ${goal.savedAmount <= 0 ? "disabled" : ""}>Remover</button>
-    </div>
-    <div class="goal-meta-actions">
-      <button class="text-button" type="button" data-goal-edit="${goal.id}">Editar</button>
-      <button class="text-button ${pending ? "pending" : ""}" type="button" data-goal-delete="${goal.id}">${pending ? "Confirmar" : "Excluir"}</button>
-    </div>
-  </article>`;
+  const head = createElement("div", { className: "goal-head" });
+  head.appendChild(createElement("div", { className: "goal-copy" }, [
+    createElement("span", { className: "mini-label goal-accent-pill", text: "Meta" }),
+    createElement("strong", { text: capitalize(goal.name) }),
+    createElement("p", { text: `Guardado ${currency.format(goal.savedAmount)} ? Alvo ${currency.format(goal.targetAmount)}` }),
+  ]));
+  head.appendChild(createElement("div", { className: "goal-progress-copy" }, [
+    createElement("strong", { text: progress >= 100 ? "100%+" : `${progress}%` }),
+    createElement("span", { text: complete ? "Conclu?da" : "Em andamento" }),
+  ]));
+  card.appendChild(head);
+
+  const track = createElement("div", { className: "goal-track", attrs: { "aria-hidden": "true" } });
+  track.appendChild(createElement("div", { className: "goal-fill", style: { width: `${fill}%` } }));
+  card.appendChild(track);
+
+  const actions = createElement("div", { className: "goal-actions" });
+  const save = createElement("button", { className: "secondary-action compact goal-action", attrs: { type: "button" }, text: "Guardar" });
+  save.dataset.goalSave = goal.id;
+  save.disabled = availableBalance <= 0;
+  const remove = createElement("button", { className: "secondary-action compact goal-action", attrs: { type: "button" }, text: "Remover" });
+  remove.dataset.goalRemove = goal.id;
+  remove.disabled = goal.savedAmount <= 0;
+  actions.append(save, remove);
+  card.appendChild(actions);
+
+  const metaActions = createElement("div", { className: "goal-meta-actions" });
+  const edit = createElement("button", { className: "text-button", attrs: { type: "button" }, text: "Editar" });
+  edit.dataset.goalEdit = goal.id;
+  const del = createElement("button", { className: `text-button ${pending ? "pending" : ""}`, attrs: { type: "button" }, text: pending ? "Confirmar" : "Excluir" });
+  del.dataset.goalDelete = goal.id;
+  metaActions.append(edit, del);
+  card.appendChild(metaActions);
+
+  return card;
 }
 
 function openCloseCycleSheet() {
@@ -3563,10 +3802,11 @@ function renderCycles() {
     : "Feche o ciclo atual quando quiser virar o período.";
 
   elements.closedCyclesCount.textContent = `${closedCycles.length} ciclo${closedCycles.length === 1 ? "" : "s"}`;
-  elements.cycleList.innerHTML = closedCycles.length
-    ? closedCycles.map(renderCycleCard).join("")
-    : renderEmptyState("Nenhum ciclo fechado", "Quando você fechar o ciclo atual, ele aparece aqui em modo somente leitura.");
-
+  elements.cycleList.replaceChildren(
+    ...(closedCycles.length
+      ? closedCycles.map(renderCycleCard)
+      : [renderEmptyState("Nenhum ciclo fechado", "Quando voc? fechar o ciclo atual, ele aparece aqui em modo somente leitura.")]),
+  );
   elements.cycleList.querySelectorAll("[data-open-cycle]").forEach((button) => {
     button.addEventListener("click", () => {
       void openCycleDetail(button.dataset.openCycle);
@@ -3577,17 +3817,22 @@ function renderCycles() {
 function renderCycleCard(cycle) {
   const balanceTone = cycle.balance >= 0 ? "good" : "alert";
   const period = formatCyclePeriod(cycle);
-  return `<article class="cycle-card closed ${balanceTone}">
-    <div>
-      <span class="mini-label">${cycle.status === "active" ? "Ativo" : "Fechado"}</span>
-      <strong>${escapeHtml(cycle.label || "Ciclo")}</strong>
-      <p>${escapeHtml(period)} · ${cycle.movementCount} movimento${cycle.movementCount === 1 ? "" : "s"}</p>
-    </div>
-    <div class="cycle-card-side">
-      <strong>${currency.format(cycle.balance)}</strong>
-      <button class="text-button" type="button" data-open-cycle="${cycle.id}">Abrir</button>
-    </div>
-  </article>`;
+  const card = createElement("article", { className: `cycle-card closed ${balanceTone}` });
+
+  const copy = createElement("div");
+  copy.appendChild(createElement("span", { className: "mini-label", text: cycle.status === "active" ? "Ativo" : "Fechado" }));
+  copy.appendChild(createElement("strong", { text: cycle.label || "Ciclo" }));
+  copy.appendChild(createElement("p", { text: `${period} · ${cycle.movementCount} movimento${cycle.movementCount === 1 ? "" : "s"}` }));
+  card.appendChild(copy);
+
+  const side = createElement("div", { className: "cycle-card-side" });
+  side.appendChild(createElement("strong", { text: currency.format(cycle.balance) }));
+  const button = createElement("button", { className: "text-button", attrs: { type: "button" }, text: "Abrir" });
+  button.dataset.openCycle = cycle.id;
+  side.appendChild(button);
+  card.appendChild(side);
+
+  return card;
 }
 
 async function openCycleDetail(cycleId) {
@@ -3624,9 +3869,9 @@ function renderCycleDetail() {
   elements.cycleDetailCount.textContent = String(cycle.movementCount || movements.length);
   elements.cycleDetailIncome.textContent = currency.format(cycle.incomeTotal || 0);
   elements.cycleDetailExpense.textContent = currency.format(cycle.expenseTotal || 0);
-  elements.cycleDetailList.innerHTML = renderMovementList(movements, {
-    empty: "Este ciclo não tem lançamentos.",
-  });
+  elements.cycleDetailList.replaceChildren(renderMovementList(movements, {
+    empty: "Este ciclo n?o tem lan?amentos.",
+  }));
 }
 
 function normalizeGoalName(value) {
