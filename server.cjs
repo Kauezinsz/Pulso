@@ -772,6 +772,13 @@ function parsePositiveAmount(value, { code, min = 0.01, max = DOMAIN_AMOUNT_MAX 
     throw error;
   }
 
+  const monetaryText = raw.replace(/^R\$\s*/i, "");
+  if (!/^-?\d[\d.,\s]*$/.test(monetaryText)) {
+    const error = new Error(code);
+    error.statusCode = 400;
+    throw error;
+  }
+
   const commaCount = (raw.match(/,/g) || []).length;
   if (commaCount > 1) {
     const error = new Error(code);
@@ -779,9 +786,9 @@ function parsePositiveAmount(value, { code, min = 0.01, max = DOMAIN_AMOUNT_MAX 
     throw error;
   }
 
-  const normalized = raw.includes(",")
-    ? raw.replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "")
-    : raw.replace(/[^\d.-]/g, "");
+  const normalized = monetaryText.includes(",")
+    ? monetaryText.replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "")
+    : monetaryText.replace(/[^\d.-]/g, "");
   if (!normalized || /-/.test(normalized.slice(1)) || (normalized.match(/\./g) || []).length > 1) {
     const error = new Error(code);
     error.statusCode = 400;

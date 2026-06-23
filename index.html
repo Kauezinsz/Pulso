@@ -626,7 +626,7 @@
 
   <section class="sheet" id="goal-sheet" aria-hidden="true">
     <div class="sheet-backdrop" data-close-goal-sheet></div>
-    <form class="movement-form goal-form" id="goal-form">
+    <form class="movement-form goal-form" id="goal-form" role="dialog" aria-modal="true" aria-labelledby="goal-sheet-title">
       <div class="grabber" aria-hidden="true"></div>
       <div class="sheet-header">
         <div>
@@ -665,7 +665,7 @@
 
   <section class="sheet" id="goal-amount-sheet" aria-hidden="true">
     <div class="sheet-backdrop" data-close-goal-amount-sheet></div>
-    <form class="movement-form goal-amount-form" id="goal-amount-form">
+    <form class="movement-form goal-amount-form" id="goal-amount-form" role="dialog" aria-modal="true" aria-labelledby="goal-amount-title">
       <div class="grabber" aria-hidden="true"></div>
       <div class="sheet-header">
         <div>
@@ -697,7 +697,7 @@
 
   <section class="sheet" id="commitment-sheet" aria-hidden="true">
     <div class="sheet-backdrop" data-close-commitment-sheet></div>
-    <form class="movement-form commitment-form" id="commitment-form">
+    <form class="movement-form commitment-form" id="commitment-form" role="dialog" aria-modal="true" aria-labelledby="commitment-sheet-title">
       <div class="grabber" aria-hidden="true"></div>
       <div class="sheet-header">
         <div>
@@ -743,7 +743,7 @@
     </form>
   </section>
 
-  <script src="./app.js?v=20260612-auth-hardening"></script>
+  <script src="./app.js?v=20260623-final-sweep"></script>
   <script src="./receipt-camera.js?v=20260611-authfix"></script>
 </body>
 

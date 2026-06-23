@@ -1186,7 +1186,7 @@ function renderSummary(totals, options = {}) {
   }
 
   elements.recentList.replaceChildren(renderMovementList(sortMovements(state.movements).slice(0, 4), {
-    empty: "Seu ciclo atual fica vivo assim que voc? adiciona a primeira movimenta??o.",
+    empty: "Seu ciclo atual fica vivo assim que você adiciona a primeira movimentação.",
   }));
   elements.quickInsights.replaceChildren(...buildInsights(totals).slice(0, 2).map(renderInsightCard));
   if (options.pulse) {
@@ -1202,7 +1202,7 @@ function renderHistory() {
 
   elements.historyList.replaceChildren(renderMovementList(filtered, {
     withActions: true,
-    empty: "Nenhum lan?amento neste filtro do ciclo atual.",
+    empty: "Nenhum lançamento neste filtro do ciclo atual.",
   }));
   elements.historyList.querySelectorAll("[data-edit]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1244,8 +1244,8 @@ function renderAnalysis(totals) {
 
   if (!top) {
     elements.topCategory.textContent = state.analysisType === "expense" ? "Sem gastos ainda" : "Sem receitas ainda";
-    elements.topCategoryCopy.textContent = `Registre ${state.analysisType === "expense" ? "uma sa?da" : "uma entrada"} para o Pulso desenhar o ciclo.`;
-    elements.categoryBars.replaceChildren(renderEmptyState("An?lise limpa", "As categorias aparecem aqui com peso, propor??o e leitura r?pida."));
+    elements.topCategoryCopy.textContent = `Registre ${state.analysisType === "expense" ? "uma saída" : "uma entrada"} para o Pulso desenhar o ciclo.`;
+    elements.categoryBars.replaceChildren(renderEmptyState("Análise limpa", "As categorias aparecem aqui com peso, proporção e leitura rápida."));
     elements.categoryDonut.replaceChildren();
     elements.donutCenter.textContent = "0%";
     return;
@@ -1304,13 +1304,13 @@ function renderMovementList(movements, options = {}) {
 
     if (options.withActions) {
       const details = createElement("details", { className: "row-actions" });
-      const summary = createElement("summary", { attrs: { "aria-label": `A??es de ${movement.description}` } }, [
+      const summary = createElement("summary", { attrs: { "aria-label": `Ações de ${movement.description}` } }, [
         createElement("span"),
         createElement("span"),
         createElement("span"),
       ]);
       details.appendChild(summary);
-      const menu = createElement("div", { className: "action-menu", attrs: { "aria-label": "A??es da movimenta??o" } });
+      const menu = createElement("div", { className: "action-menu", attrs: { "aria-label": "Ações da movimentação" } });
       const edit = createElement("button", { className: "row-action edit", attrs: { type: "button" }, text: "Editar" });
       edit.dataset.edit = movement.id;
       edit.setAttribute("aria-label", `Editar ${movement.description}`);
@@ -1356,7 +1356,7 @@ function renderCategoryRow(item, total, movementLabel, expanded = false) {
 
   if (expanded) {
     const expand = createElement("div", { className: "category-expand" });
-    expand.setAttribute("aria-label", `Movimenta??es de ${item.category}`);
+    expand.setAttribute("aria-label", `Movimentações de ${item.category}`);
     expand.appendChild(renderAnalysisMovements(item.category));
     article.appendChild(expand);
   }
@@ -1364,7 +1364,7 @@ function renderCategoryRow(item, total, movementLabel, expanded = false) {
   return article;
 }
 function renderPieChart(grouped, total) {
-  const svg = createSvgElement("svg", { viewBox: "0 0 120 120", role: "img", "aria-label": "Distribui??o por categoria" });
+  const svg = createSvgElement("svg", { viewBox: "0 0 120 120", role: "img", "aria-label": "Distribuição por categoria" });
 
   if (grouped.length === 1) {
     const item = grouped[0];
@@ -1465,11 +1465,11 @@ function renderAnalysisMovements(category) {
   const movements = sortMovements(state.movements).filter((movement) => movement.type === state.analysisType && sameCategory(movement.category || getCategoryNameById(movement.categoryId), category));
   const wrapper = createElement("div", { className: movements.length ? "category-expand-list" : "category-expand-empty" });
   if (!movements.length) {
-    wrapper.appendChild(renderEmptyState("Sem movimenta??es", "Esta categoria ainda n?o tem lan?amentos neste ciclo."));
+    wrapper.appendChild(renderEmptyState("Sem movimentações", "Esta categoria ainda não tem lançamentos neste ciclo."));
     return wrapper;
   }
 
-  wrapper.appendChild(renderMovementList(movements, { empty: "Sem movimenta??es" }));
+  wrapper.appendChild(renderMovementList(movements, { empty: "Sem movimentações" }));
   return wrapper;
 }
 function updateAnalysisFocus(item, total) {
@@ -1509,7 +1509,7 @@ function buildInsights(totals) {
       badge: "Maior impacto",
       tone: "impact",
       title: `${capitalize(top.category)} está puxando o ciclo`,
-      copy: `${currency.format(top.total)} foram para ${top.category}. �? o melhor ponto para olhar primeiro.`,
+      copy: `${currency.format(top.total)} foram para ${top.category}. É o melhor ponto para olhar primeiro.`,
     });
   }
 
@@ -1540,14 +1540,14 @@ function buildInsights(totals) {
 
   if (last7 > previous7 && previous7 > 0) {
     insights.push({
-      badge: "�sltimos 7 dias",
+      badge: "Últimos 7 dias",
       tone: "alert",
       title: "A semana acelerou",
       copy: `${currency.format(last7 - previous7)} a mais em gastos que a semana anterior.`,
     });
   } else if (last7 > 0) {
     insights.push({
-      badge: "�sltimos 7 dias",
+      badge: "Últimos 7 dias",
       tone: "soft",
       title: "Ritmo recente mapeado",
       copy: `Suas saídas recentes somaram ${currency.format(last7)}.`,
@@ -3507,16 +3507,16 @@ function renderCommitments() {
   elements.commitmentDoneList.replaceChildren(
     ...(done.length
       ? done.map((item) => renderCommitmentCard(item))
-      : [renderEmptyState("Nada conclu?do", "Quando voc? conclui um compromisso, ele muda de lado e pode ser lan?ado no hist?rico.")]),
+      : [renderEmptyState("Nada concluído", "Quando você conclui um compromisso, ele muda de lado e pode ser lançado no histórico.")]),
   );
 }
 
 function renderCommitmentSections(buckets) {
   const sections = [
-    { key: "overdue", title: "Atrasados", copy: "J? passaram do vencimento." },
+    { key: "overdue", title: "Atrasados", copy: "Já passaram do vencimento." },
     { key: "today", title: "Vencendo hoje", copy: "Itens para resolver ainda hoje." },
-    { key: "week", title: "Pr?ximos 7 dias", copy: "Planejamento de curto prazo." },
-    { key: "later", title: "Mais ? frente", copy: "Compromissos j? com data definida." },
+    { key: "week", title: "Próximos 7 dias", copy: "Planejamento de curto prazo." },
+    { key: "later", title: "Mais à frente", copy: "Compromissos já com data definida." },
     { key: "nodate", title: "Sem vencimento", copy: "Planejado, mas ainda sem data." },
   ];
   const fragment = document.createDocumentFragment();
@@ -3554,7 +3554,7 @@ function renderCommitmentCard(commitment) {
   const pendingDelete = state.pendingDeleteCommitment === commitment.id;
   const pendingLaunch = state.pendingLaunchCommitment === commitment.id;
   const canLaunch = commitmentStatus === "done" && !isLaunched;
-  const launchLabel = pendingLaunch ? "Confirmar lan?amento" : "Lan?ar no hist?rico";
+  const launchLabel = pendingLaunch ? "Confirmar lançamento" : "Lançar no histórico";
   const dueBadge = dueState.label || "Sem vencimento";
   const dueClassName = safeClassToken(dueState.className, ["no-date", "overdue", "due-today", "due-soon", "future"], "");
   const dueBadgeTone = safeClassToken(dueState.badgeTone, ["muted", "danger", "warning", "info"], "muted");
@@ -3567,25 +3567,25 @@ function renderCommitmentCard(commitment) {
     createElement("span", { className: `commitment-badge status ${isPending ? "pending" : "done"}`, text: statusLabel }),
     createElement("span", { className: `commitment-badge due ${dueBadgeTone}`, text: dueBadge }),
   ]);
-  if (isLaunched) badges.appendChild(createElement("span", { className: "commitment-badge launch", text: "Lan?ado" }));
+  if (isLaunched) badges.appendChild(createElement("span", { className: "commitment-badge launch", text: "Lançado" }));
   copy.appendChild(badges);
   copy.appendChild(createElement("strong", { text: commitment.description }));
-  copy.appendChild(createElement("p", { text: `${commitmentType === "receivable" ? "Valor a entrar" : "Valor a sair"} ${currency.format(commitment.amount)}${commitment.dueDate ? ` ? ${formatOptionalDate(commitment.dueDate)}` : " ? Sem vencimento"}` }));
+  copy.appendChild(createElement("p", { text: `${commitmentType === "receivable" ? "Valor a entrar" : "Valor a sair"} ${currency.format(commitment.amount)}${commitment.dueDate ? ` - ${formatOptionalDate(commitment.dueDate)}` : " - Sem vencimento"}` }));
   head.appendChild(copy);
   head.appendChild(createElement("div", { className: "commitment-value" }, [
     createElement("strong", { text: currency.format(commitment.amount) }),
-    createElement("span", { text: commitmentType === "receivable" ? "Entrada prevista" : "Sa?da prevista" }),
+    createElement("span", { text: commitmentType === "receivable" ? "Entrada prevista" : "Saída prevista" }),
   ]));
   card.appendChild(head);
   card.appendChild(createElement("div", { className: "commitment-meta" }, [
     createElement("span", { text: commitment.dueDate ? `Prazo ${formatOptionalDate(commitment.dueDate)}` : "Sem data definida" }),
-    createElement("span", { text: isLaunched ? "J? virou movimento real" : "Ainda n?o entrou no hist?rico" }),
+    createElement("span", { text: isLaunched ? "Já virou movimento real" : "Ainda não entrou no histórico" }),
   ]));
 
   const actions = createElement("div", { className: "commitment-actions" });
   const edit = createElement("button", { className: "secondary-action compact commitment-action", attrs: { type: "button" }, text: "Editar" });
   edit.dataset.commitmentEdit = commitment.id;
-  const toggle = createElement("button", { className: "secondary-action compact commitment-action", attrs: { type: "button" }, text: isPending ? "Concluir e lan?ar" : "Reabrir" });
+  const toggle = createElement("button", { className: "secondary-action compact commitment-action", attrs: { type: "button" }, text: isPending ? "Concluir e lançar" : "Reabrir" });
   toggle.dataset.commitmentToggle = commitment.id;
   actions.append(edit, toggle);
   if (canLaunch) {
@@ -3805,7 +3805,7 @@ function renderCycles() {
   elements.cycleList.replaceChildren(
     ...(closedCycles.length
       ? closedCycles.map(renderCycleCard)
-      : [renderEmptyState("Nenhum ciclo fechado", "Quando voc? fechar o ciclo atual, ele aparece aqui em modo somente leitura.")]),
+      : [renderEmptyState("Nenhum ciclo fechado", "Quando você fechar o ciclo atual, ele aparece aqui em modo somente leitura.")]),
   );
   elements.cycleList.querySelectorAll("[data-open-cycle]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3870,16 +3870,8 @@ function renderCycleDetail() {
   elements.cycleDetailIncome.textContent = currency.format(cycle.incomeTotal || 0);
   elements.cycleDetailExpense.textContent = currency.format(cycle.expenseTotal || 0);
   elements.cycleDetailList.replaceChildren(renderMovementList(movements, {
-    empty: "Este ciclo n?o tem lan?amentos.",
+    empty: "Este ciclo não tem lançamentos.",
   }));
-}
-
-function normalizeGoalName(value) {
-  return String(value || "").trim().replace(/\s+/g, " ");
-}
-
-function normalizeCategoryName(value) {
-  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
 }
 
 window.state = state;

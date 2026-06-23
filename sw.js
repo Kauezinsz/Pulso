@@ -1,9 +1,9 @@
-const CACHE_NAME = "pulso-pwa-v13-sw-hardening";
+const CACHE_NAME = "pulso-pwa-v14-final-sweep";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css?v=20260611-authfix",
-  "./app.js?v=20260612-auth-hardening",
+  "./app.js?v=20260623-final-sweep",
   "./receipt-camera.js?v=20260611-authfix",
   "./manifest.webmanifest",
   "./icon.png",
