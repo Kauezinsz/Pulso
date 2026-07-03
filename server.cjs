@@ -7,7 +7,7 @@ const { DatabaseSync } = require("node:sqlite");
 const root = __dirname;
 const host = "127.0.0.1";
 const port = Number(process.env.PORT || process.env.PULSO_PORT || 4173);
-const appBasePath = process.env.PULSO_BASE_PATH || "/pulso";
+const appBasePath = normalizeAppBasePath(process.env.PULSO_BASE_PATH || "/pulso");
 const dataDir = path.join(root, "data");
 const uploadsDir = path.join(dataDir, "uploads");
 const dbPath = process.env.PULSO_DB_PATH || path.join(dataDir, "pulso.sqlite");
@@ -54,6 +54,12 @@ const defaultCategoriesByType = {
   income: ["salário", "freelance", "venda", "outros"],
   expense: ["alimentação", "transporte", "moradia", "contas", "lazer", "saúde", "compras", "trabalho", "outros"],
 };
+
+function normalizeAppBasePath(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "/") return raw === "/" ? "/" : "";
+  return `/${raw.replace(/^\/+|\/+$/g, "")}`;
+}
 
 function withAppBasePath(pathname) {
   if (!appBasePath || appBasePath === "/") return pathname;
@@ -944,6 +950,15 @@ function sendText(response, statusCode, text, contentType = "text/plain; charset
     "Cache-Control": "no-cache",
   });
   response.end(text);
+}
+
+function sendRedirect(response, location, statusCode = 308) {
+  response.writeHead(statusCode, {
+    ...buildSecurityHeaders(),
+    "Location": location,
+    "Cache-Control": "no-store",
+  });
+  response.end();
 }
 
 function cleanupExpiredSessions(force = false) {
@@ -2657,6 +2672,11 @@ cleanupExpiredSessions(true);
 
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${host}`);
+  if (appBasePath && appBasePath !== "/" && url.pathname === appBasePath && (request.method || "GET").toUpperCase() === "GET") {
+    sendRedirect(response, `${appBasePath}/${url.search || ""}`);
+    return;
+  }
+
   const pathname = normalizeRequestPath(url.pathname);
   const method = (request.method || "GET").toUpperCase();
 
