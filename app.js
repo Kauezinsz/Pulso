@@ -517,7 +517,7 @@ function renderReceiptPreview(receipt) {
     ]),
     createElement("div", { className: "receipt-preview-copy" }, [
       createElement("strong", { text: labelText }),
-      createElement("span", { text: `${isPdf ? "Documento PDF" : "Imagem"}${sizeLabel ? ` ? ${sizeLabel}` : ""}` }),
+      createElement("span", { text: `${isPdf ? "Documento PDF" : "Imagem"}${sizeLabel ? ` - ${sizeLabel}` : ""}` }),
     ]),
   ]);
 }
@@ -805,7 +805,7 @@ function closeCategorySheet() {
 
 function renderCategoryList() {
   const categories = getCategoriesForType(state.formType);
-  elements.categorySheetContext.textContent = state.formType === "income" ? "Entrada" : "Sa?da";
+  elements.categorySheetContext.textContent = state.formType === "income" ? "Entrada" : "Saída";
   const fragment = document.createDocumentFragment();
 
   for (const category of categories) {
@@ -895,7 +895,7 @@ async function saveNewCategory() {
     if (isRename) {
       const categoryId = getCategoryIdByName(state.formType, originalCategory);
       if (!categoryId) {
-        elements.categoryError.textContent = "Nao foi possivel localizar esta categoria.";
+        elements.categoryError.textContent = "Não foi possível localizar esta categoria.";
         return;
       }
 
@@ -1273,7 +1273,7 @@ function renderInsights(totals) {
 function renderMovementList(movements, options = {}) {
   const fragment = document.createDocumentFragment();
   if (!movements.length) {
-    fragment.appendChild(renderEmptyState("Tudo calmo", options.empty || "O primeiro registro j? muda a leitura."));
+    fragment.appendChild(renderEmptyState("Tudo calmo", options.empty || "O primeiro registro já muda a leitura."));
     return fragment;
   }
 
@@ -1289,7 +1289,7 @@ function renderMovementList(movements, options = {}) {
 
     article.appendChild(createElement("div", { className: "movement-main" }, [
       createElement("strong", { text: movement.description }),
-      createElement("span", { text: `${capitalize(categoryName)} ? ${formatDate(movement.date)}` }),
+      createElement("span", { text: `${capitalize(categoryName)} - ${formatDate(movement.date)}` }),
     ]));
 
     const side = createElement("div", { className: "movement-side" });
@@ -1996,15 +1996,15 @@ function clearAuthMessage() {
 }
 
 function authErrorMessage(error) {
-  if (!error) return "Nao foi possivel continuar.";
-  if (error.code === "email_in_use") return "Esse e-mail ja esta em uso.";
-  if (error.code === "registration_failed") return "Nao foi possivel criar a conta com esses dados.";
+  if (!error) return "Não foi possível continuar.";
+  if (error.code === "email_in_use") return "Esse e-mail já está em uso.";
+  if (error.code === "registration_failed") return "Não foi possível criar a conta com esses dados.";
   if (error.code === "invalid_auth_request") return "Revise o e-mail e a senha para continuar.";
-  if (error.code === "invalid_credentials") return "E-mail ou senha invalidos.";
-  if (error.code === "unauthorized") return "Sua sessao expirou. Entre novamente.";
+  if (error.code === "invalid_credentials") return "E-mail ou senha inválidos.";
+  if (error.code === "unauthorized") return "Sua sessão expirou. Entre novamente.";
   if (error.code === "too_many_requests") return "Muitas tentativas. Aguarde um pouco e tente novamente.";
-  if (error.code === "payload_too_large") return "Os dados enviados sao grandes demais.";
-  if (error.code === "invalid_json") return "Nao foi possivel processar esses dados.";
+  if (error.code === "payload_too_large") return "Os dados enviados são grandes demais.";
+  if (error.code === "invalid_json") return "Não foi possível processar esses dados.";
   if (error.code === "network_error") return "Não conseguimos conectar ao servidor.";
   if (error.code === "insufficient_balance") return "Saldo insuficiente para concluir esta conta.";
   if (error.code === "invalid_category") return "Revise o nome da categoria.";
@@ -2031,7 +2031,7 @@ function authErrorMessage(error) {
   if (error.code === "receipt_not_found") return "Comprovante não encontrado.";
   if (error.code === "invalid_receipt_type") return "Envie uma imagem JPG, PNG, WEBP ou um PDF.";
   if (error.code === "receipt_too_large") return "O arquivo do comprovante excede o limite permitido.";
-  return error.message || "Nao foi possivel continuar.";
+  return error.message || "Não foi possível continuar.";
 }
 
 function handleUnauthorizedError(error) {
@@ -3719,11 +3719,11 @@ function renderGoalCard(goal, availableBalance) {
   head.appendChild(createElement("div", { className: "goal-copy" }, [
     createElement("span", { className: "mini-label goal-accent-pill", text: "Meta" }),
     createElement("strong", { text: capitalize(goal.name) }),
-    createElement("p", { text: `Guardado ${currency.format(goal.savedAmount)} ? Alvo ${currency.format(goal.targetAmount)}` }),
+    createElement("p", { text: `Guardado ${currency.format(goal.savedAmount)} - Alvo ${currency.format(goal.targetAmount)}` }),
   ]));
   head.appendChild(createElement("div", { className: "goal-progress-copy" }, [
     createElement("strong", { text: progress >= 100 ? "100%+" : `${progress}%` }),
-    createElement("span", { text: complete ? "Conclu?da" : "Em andamento" }),
+    createElement("span", { text: complete ? "Concluída" : "Em andamento" }),
   ]));
   card.appendChild(head);
 
