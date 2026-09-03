@@ -175,7 +175,6 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS goals (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    cycle_id TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     slug TEXT NOT NULL,
     accent TEXT,
@@ -183,7 +182,7 @@ db.exec(`
     saved_amount REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE(user_id, cycle_id, slug)
+    UNIQUE(user_id, slug)
   );
 
   CREATE TABLE IF NOT EXISTS commitments (
@@ -203,13 +202,14 @@ db.exec(`
   );
 
   CREATE UNIQUE INDEX IF NOT EXISTS idx_cycles_one_active_per_user ON cycles(user_id) WHERE status = 'active';
-  CREATE INDEX IF NOT EXISTS idx_goals_cycle_lookup ON goals(user_id, cycle_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_goals_user_lookup ON goals(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_commitments_cycle_lookup ON commitments(user_id, cycle_id, status, due_date, created_at DESC);
 `);
 
 ensureMovementCycleColumn();
 ensureMovementReceiptColumns();
 ensureGoalAccentColumn();
+migrateGoalsSchemaIfNeeded();
 
 const statements = {
   insertUser: db.prepare(`
@@ -315,11 +315,10 @@ const statements = {
     GROUP BY cycles.id
     LIMIT 1
   `),
-  listGoalsByCycle: db.prepare(`
+  listGoalsByUser: db.prepare(`
     SELECT
       goals.id,
       goals.user_id AS userId,
-      goals.cycle_id AS cycleId,
       goals.name,
       goals.slug,
       goals.accent,
@@ -328,7 +327,7 @@ const statements = {
       goals.created_at AS createdAt,
       goals.updated_at AS updatedAt
     FROM goals
-    WHERE goals.user_id = ? AND goals.cycle_id = ?
+    WHERE goals.user_id = ?
     ORDER BY goals.created_at DESC
   `),
   listCommitmentsByCycle: db.prepare(`
@@ -397,7 +396,6 @@ const statements = {
     SELECT
       goals.id,
       goals.user_id AS userId,
-      goals.cycle_id AS cycleId,
       goals.name,
       goals.slug,
       goals.accent,
@@ -406,14 +404,13 @@ const statements = {
       goals.created_at AS createdAt,
       goals.updated_at AS updatedAt
     FROM goals
-    WHERE goals.id = ? AND goals.user_id = ? AND goals.cycle_id = ?
+    WHERE goals.id = ? AND goals.user_id = ?
     LIMIT 1
   `),
   findGoalBySlug: db.prepare(`
     SELECT
       goals.id,
       goals.user_id AS userId,
-      goals.cycle_id AS cycleId,
       goals.name,
       goals.slug,
       goals.accent,
@@ -422,33 +419,33 @@ const statements = {
       goals.created_at AS createdAt,
       goals.updated_at AS updatedAt
     FROM goals
-    WHERE goals.user_id = ? AND goals.cycle_id = ? AND goals.slug = ?
+    WHERE goals.user_id = ? AND goals.slug = ?
     LIMIT 1
   `),
-  sumGoalsSavedByCycle: db.prepare(`
+  sumGoalsSavedByUser: db.prepare(`
     SELECT COALESCE(SUM(saved_amount), 0) AS total
     FROM goals
-    WHERE user_id = ? AND cycle_id = ?
+    WHERE user_id = ?
   `),
   insertGoal: db.prepare(`
     INSERT INTO goals (
-      id, user_id, cycle_id, name, slug, accent, target_amount, saved_amount, created_at, updated_at
+      id, user_id, name, slug, accent, target_amount, saved_amount, created_at, updated_at
     )
     VALUES (
-      @id, @userId, @cycleId, @name, @slug, @accent, @targetAmount, @savedAmount, @createdAt, @updatedAt
+      @id, @userId, @name, @slug, @accent, @targetAmount, @savedAmount, @createdAt, @updatedAt
     )
   `),
   updateGoal: db.prepare(`
     UPDATE goals
     SET name = ?, slug = ?, accent = ?, target_amount = ?, updated_at = ?
-    WHERE id = ? AND user_id = ? AND cycle_id = ?
+    WHERE id = ? AND user_id = ?
   `),
   updateGoalSavedAmount: db.prepare(`
     UPDATE goals
     SET saved_amount = ?, updated_at = ?
-    WHERE id = ? AND user_id = ? AND cycle_id = ?
+    WHERE id = ? AND user_id = ?
   `),
-  deleteGoal: db.prepare(`DELETE FROM goals WHERE id = ? AND user_id = ? AND cycle_id = ?`),
+  deleteGoal: db.prepare(`DELETE FROM goals WHERE id = ? AND user_id = ?`),
   assignLegacyMovementsToCycle: db.prepare(`
     UPDATE movements
     SET cycle_id = ?
@@ -597,6 +594,75 @@ function ensureGoalAccentColumn() {
   const columns = db.prepare(`PRAGMA table_info(goals)`).all().map((column) => column.name);
   if (!columns.includes("accent")) {
     db.exec(`ALTER TABLE goals ADD COLUMN accent TEXT`);
+  }
+}
+
+function migrateGoalsSchemaIfNeeded() {
+  const columns = db.prepare(`PRAGMA table_info(goals)`).all().map((column) => column.name);
+  if (!columns.includes("cycle_id")) return;
+
+  let previousForeignKeys;
+  try {
+    previousForeignKeys = db.prepare(`PRAGMA foreign_keys`).get()?.foreign_keys ?? 0;
+  } catch {
+    previousForeignKeys = 0;
+  }
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    const duplicateGroups = db.prepare(`
+      SELECT user_id, slug, COUNT(*) AS total
+      FROM goals
+      GROUP BY user_id, slug
+      HAVING COUNT(*) > 1
+    `).all();
+
+    for (const group of duplicateGroups) {
+      const rows = db.prepare(`
+        SELECT * FROM goals WHERE user_id = ? AND slug = ? ORDER BY created_at ASC
+      `).all(group.user_id, group.slug);
+      if (rows.length < 2) continue;
+
+      const keep = rows[rows.length - 1];
+      const savedAmount = rows.reduce((sum, row) => sum + Number(row.saved_amount || 0), 0);
+      const targetAmount = Math.max(...rows.map((row) => Number(row.target_amount || 0)));
+      db.prepare(`
+        UPDATE goals
+        SET saved_amount = ?, target_amount = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?
+      `).run(savedAmount, targetAmount, nowIso(), keep.id, group.user_id);
+
+      for (const row of rows) {
+        if (row.id === keep.id) continue;
+        db.prepare(`DELETE FROM goals WHERE id = ? AND user_id = ?`).run(row.id, group.user_id);
+      }
+    }
+
+    db.exec(`
+      CREATE TABLE goals_v2 (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        accent TEXT,
+        target_amount REAL NOT NULL,
+        saved_amount REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, slug)
+      );
+      INSERT INTO goals_v2 (id, user_id, name, slug, accent, target_amount, saved_amount, created_at, updated_at)
+        SELECT id, user_id, name, slug, accent, target_amount, saved_amount, created_at, updated_at FROM goals;
+      DROP TABLE goals;
+      ALTER TABLE goals_v2 RENAME TO goals;
+      CREATE INDEX IF NOT EXISTS idx_goals_user_lookup ON goals(user_id, created_at DESC);
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    db.exec(`PRAGMA foreign_keys = ${previousForeignKeys ? "ON" : "OFF"}`);
   }
 }
 
@@ -1320,7 +1386,6 @@ function serializeGoal(row) {
   return {
     id: row.id,
     userId: row.userId,
-    cycleId: row.cycleId,
     name: row.name,
     slug: row.slug,
     accent,
@@ -1368,8 +1433,8 @@ function listClosedCyclesByUser(userId) {
   return statements.listClosedCyclesByUser.all(userId).map(serializeCycle);
 }
 
-function listGoalsByCycle(userId, cycleId) {
-  return statements.listGoalsByCycle.all(userId, cycleId).map(serializeGoal);
+function listGoalsByUser(userId) {
+  return statements.listGoalsByUser.all(userId).map(serializeGoal);
 }
 
 function listCommitmentsByCycle(userId, cycleId) {
@@ -1416,8 +1481,8 @@ function ensureCurrentCycle(userId) {
   return getCycleSummary(userId, cycle.id) || serializeCycle(cycle);
 }
 
-function getGoalSummary(userId, cycleId) {
-  return Number(statements.sumGoalsSavedByCycle.get(userId, cycleId)?.total || 0);
+function getGoalSummary(userId) {
+  return Number(statements.sumGoalsSavedByUser.get(userId)?.total || 0);
 }
 
 function formatCycleLabel(startedAt, closedAt) {
@@ -1434,6 +1499,10 @@ function closeCurrentCycle(userId) {
     error.statusCode = 404;
     throw error;
   }
+
+  const cycleSummaryRow = statements.listCycleSummaryById.get(userId, activeCycle.id);
+  const cycleSummary = serializeCycle(cycleSummaryRow);
+  const closingBalance = cycleSummary ? Number(cycleSummary.balance || 0) : 0;
 
   const closedAt = nowIso();
   const label = formatCycleLabel(activeCycle.startedAt, closedAt);
@@ -1454,6 +1523,36 @@ function closeCurrentCycle(userId) {
       createdAt: timestamp,
       updatedAt: timestamp,
     });
+
+    if (closingBalance !== 0) {
+      const type = closingBalance > 0 ? "income" : "expense";
+      const amount = Math.abs(closingBalance);
+      const catSlug = "outros";
+      
+      const cat = db.prepare("SELECT id FROM categories WHERE user_id = ? AND type = ? AND slug = ? LIMIT 1").get(userId, type, catSlug);
+      
+      if (cat) {
+        statements.insertMovement.run({
+          id: uuid(),
+          userId,
+          cycleId: newCycleId,
+          type,
+          amount,
+          categoryId: cat.id,
+          description: closingBalance > 0 ? "Restante do ciclo anterior" : "Dívida do ciclo anterior",
+          movementDate: timestamp.split("T")[0],
+          sourceKey: uuid(),
+          receiptStoredName: null,
+          receiptOriginalName: null,
+          receiptMimeType: null,
+          receiptSize: null,
+          receiptUploadedAt: null,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        });
+      }
+    }
+
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1467,7 +1566,7 @@ function closeCurrentCycle(userId) {
   };
 }
 
-function ensureGoalCapacity(userId, cycleId, name, targetAmount, accentValue) {
+function ensureGoalCapacity(userId, name, targetAmount, accentValue) {
   const normalizedName = normalizeGoalName(name);
   const slug = slugify(normalizedName);
   const amount = parsePositiveAmount(targetAmount, { code: "invalid_goal" });
@@ -1479,7 +1578,7 @@ function ensureGoalCapacity(userId, cycleId, name, targetAmount, accentValue) {
     throw error;
   }
 
-  const existing = statements.findGoalBySlug.get(userId, cycleId, slug);
+  const existing = statements.findGoalBySlug.get(userId, slug);
   if (existing) {
     const error = new Error("goal_exists");
     error.statusCode = 409;
@@ -1491,7 +1590,6 @@ function ensureGoalCapacity(userId, cycleId, name, targetAmount, accentValue) {
   statements.insertGoal.run({
     id,
     userId,
-    cycleId,
     name: normalizedName,
     slug,
     accent,
@@ -1501,11 +1599,11 @@ function ensureGoalCapacity(userId, cycleId, name, targetAmount, accentValue) {
     updatedAt: timestamp,
   });
 
-  return statements.findGoalById.get(id, userId, cycleId);
+  return statements.findGoalById.get(id, userId);
 }
 
-function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount, accentValue) {
-  const current = statements.findGoalById.get(goalId, userId, cycleId);
+function updateGoalCapacity(userId, goalId, name, targetAmount, accentValue) {
+  const current = statements.findGoalById.get(goalId, userId);
   if (!current) {
     const error = new Error("goal_not_found");
     error.statusCode = 404;
@@ -1525,7 +1623,7 @@ function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount, accentV
     throw error;
   }
 
-  const existing = statements.findGoalBySlug.get(userId, cycleId, slug);
+  const existing = statements.findGoalBySlug.get(userId, slug);
   if (existing && existing.id !== current.id) {
     const error = new Error("goal_exists");
     error.statusCode = 409;
@@ -1539,12 +1637,12 @@ function updateGoalCapacity(userId, cycleId, goalId, name, targetAmount, accentV
   }
 
   const timestamp = nowIso();
-  statements.updateGoal.run(normalizedName, slug, accent, amount, timestamp, goalId, userId, cycleId);
-  return statements.findGoalById.get(goalId, userId, cycleId);
+  statements.updateGoal.run(normalizedName, slug, accent, amount, timestamp, goalId, userId);
+  return statements.findGoalById.get(goalId, userId);
 }
 
-function saveGoalAmount(userId, cycleId, goalId, amountToSave) {
-  const goal = statements.findGoalById.get(goalId, userId, cycleId);
+function saveGoalAmount(userId, goalId, amountToSave) {
+  const goal = statements.findGoalById.get(goalId, userId);
   if (!goal) {
     const error = new Error("goal_not_found");
     error.statusCode = 404;
@@ -1553,9 +1651,10 @@ function saveGoalAmount(userId, cycleId, goalId, amountToSave) {
 
   const amount = parsePositiveAmount(amountToSave, { code: "invalid_goal_amount" });
 
-  const currentCycle = getCycleSummary(userId, cycleId);
-  const reservedTotal = getGoalSummary(userId, cycleId);
-  const availableBalance = Number(currentCycle?.balance || 0) - Number(reservedTotal || 0);
+  const currentCycle = getCurrentCycle(userId);
+  const cycleSummaryRow = statements.listCycleSummaryById.get(userId, currentCycle.id);
+  const cycleSummary = serializeCycle(cycleSummaryRow);
+  const availableBalance = Number(cycleSummary?.balance || 0);
   if (amount > availableBalance) {
     const error = new Error("insufficient_goal_balance");
     error.statusCode = 409;
@@ -1563,12 +1662,22 @@ function saveGoalAmount(userId, cycleId, goalId, amountToSave) {
   }
 
   const nextSaved = Number(goal.savedAmount || 0) + amount;
-  statements.updateGoalSavedAmount.run(nextSaved, nowIso(), goalId, userId, cycleId);
-  return statements.findGoalById.get(goalId, userId, cycleId);
+  statements.updateGoalSavedAmount.run(nextSaved, nowIso(), goalId, userId);
+
+  const category = ensureCategoryCapacity(userId, "expense", "outros");
+  upsertMovement(userId, {
+    type: "expense",
+    amount,
+    categoryId: category.id,
+    description: `Depósito na meta: ${goal.name}`,
+    date: new Date().toISOString().split("T")[0]
+  });
+
+  return statements.findGoalById.get(goalId, userId);
 }
 
-function removeGoalAmount(userId, cycleId, goalId, amountToRemove) {
-  const goal = statements.findGoalById.get(goalId, userId, cycleId);
+function removeGoalAmount(userId, goalId, amountToRemove) {
+  const goal = statements.findGoalById.get(goalId, userId);
   if (!goal) {
     const error = new Error("goal_not_found");
     error.statusCode = 404;
@@ -1585,19 +1694,29 @@ function removeGoalAmount(userId, cycleId, goalId, amountToRemove) {
   }
 
   const nextSaved = currentSaved - amount;
-  statements.updateGoalSavedAmount.run(nextSaved, nowIso(), goalId, userId, cycleId);
-  return statements.findGoalById.get(goalId, userId, cycleId);
+  statements.updateGoalSavedAmount.run(nextSaved, nowIso(), goalId, userId);
+
+  const category = ensureCategoryCapacity(userId, "income", "outros");
+  upsertMovement(userId, {
+    type: "income",
+    amount,
+    categoryId: category.id,
+    description: `Resgate da meta: ${goal.name}`,
+    date: new Date().toISOString().split("T")[0]
+  });
+
+  return statements.findGoalById.get(goalId, userId);
 }
 
-function deleteGoalById(userId, cycleId, goalId) {
-  const goal = statements.findGoalById.get(goalId, userId, cycleId);
+function deleteGoalById(userId, goalId) {
+  const goal = statements.findGoalById.get(goalId, userId);
   if (!goal) {
     const error = new Error("goal_not_found");
     error.statusCode = 404;
     throw error;
   }
 
-  statements.deleteGoal.run(goalId, userId, cycleId);
+  statements.deleteGoal.run(goalId, userId);
   return goal;
 }
 
@@ -1725,7 +1844,7 @@ function convertCommitmentToMovement(userId, cycleId, commitmentId, cycleSummary
 
   if (current.type === "payable") {
     const cycleSummary = cycleSummaryOverride || statements.listCycleSummaryById.get(userId, cycleId);
-    const reservedTotal = getGoalSummary(userId, cycleId);
+    const reservedTotal = getGoalSummary(userId);
     const availableBalance = Number(cycleSummary?.balance || 0) - Number(reservedTotal || 0);
     if (availableBalance < Number(current.amount || 0)) {
       const error = new Error("insufficient_balance");
@@ -1820,10 +1939,15 @@ function reopenCommitmentAndRevertMovement(userId, cycleId, commitmentId) {
   const linkedMovementId = current.convertedMovementId || null;
   const linkedMovement = linkedMovementId ? statements.findMovementById.get(linkedMovementId, userId) : null;
   const linkedBySource = linkedMovement ? linkedMovement : statements.findMovementBySource.get(userId, `commitment:${current.id}:launch`);
+  let receiptPathToDelete = "";
 
   db.exec("BEGIN");
   try {
     if (linkedBySource?.id) {
+      const linkedFull = statements.findMovementById.get(linkedBySource.id, userId);
+      if (linkedFull?.receipt_stored_name) {
+        receiptPathToDelete = getReceiptFilePath(linkedFull.receipt_stored_name);
+      }
       statements.deleteMovement.run(linkedBySource.id, userId);
     }
     statements.updateCommitmentStatus.run("pending", null, timestamp, commitmentId, userId, cycleId);
@@ -1832,6 +1956,10 @@ function reopenCommitmentAndRevertMovement(userId, cycleId, commitmentId) {
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
+  }
+
+  if (receiptPathToDelete) {
+    deleteFileIfExists(receiptPathToDelete);
   }
 
   return statements.findCommitmentById.get(commitmentId, userId, cycleId);
@@ -2052,7 +2180,7 @@ function collectUserBootstrap(userId) {
     cycles: listCyclesByUser(userId),
     categories: listCategoriesByUser(userId),
     movements: listMovementsByCycle(userId, currentCycle.id),
-    goals: listGoalsByCycle(userId, currentCycle.id),
+    goals: listGoalsByUser(userId),
     commitments: listCommitmentsByCycle(userId, currentCycle.id),
   };
 }
@@ -2573,17 +2701,17 @@ function handleGoals(request, response, context, pathname, method, body) {
   if (method === "GET" && pathname === "/api/goals") {
     sendJson(response, 200, {
       currentCycle,
-      goals: listGoalsByCycle(userId, currentCycle.id),
+      goals: listGoalsByUser(userId),
     });
     return;
   }
 
   if (method === "POST" && pathname === "/api/goals") {
-    const goal = ensureGoalCapacity(userId, currentCycle.id, body.name, body.targetAmount, body.accent || body.theme);
+    const goal = ensureGoalCapacity(userId, body.name, body.targetAmount, body.accent || body.theme);
     sendJson(response, 201, {
       ok: true,
       goal: serializeGoal(goal),
-      goals: listGoalsByCycle(userId, currentCycle.id),
+      goals: listGoalsByUser(userId),
       currentCycle,
     });
     return;
@@ -2599,44 +2727,44 @@ function handleGoals(request, response, context, pathname, method, body) {
   const action = match[2] || "";
 
   if (method === "PUT" || method === "PATCH") {
-    const goal = updateGoalCapacity(userId, currentCycle.id, goalId, body.name, body.targetAmount, body.accent || body.theme);
+    const goal = updateGoalCapacity(userId, goalId, body.name, body.targetAmount, body.accent || body.theme);
     sendJson(response, 200, {
       ok: true,
       goal: serializeGoal(goal),
-      goals: listGoalsByCycle(userId, currentCycle.id),
+      goals: listGoalsByUser(userId),
       currentCycle,
     });
     return;
   }
 
   if (method === "DELETE" && !action) {
-    const goal = deleteGoalById(userId, currentCycle.id, goalId);
+    const goal = deleteGoalById(userId, goalId);
     sendJson(response, 200, {
       ok: true,
       goal: serializeGoal(goal),
-      goals: listGoalsByCycle(userId, currentCycle.id),
+      goals: listGoalsByUser(userId),
       currentCycle,
     });
     return;
   }
 
   if (method === "POST" && action === "save") {
-    const goal = saveGoalAmount(userId, currentCycle.id, goalId, body.amount);
+    const goal = saveGoalAmount(userId, goalId, body.amount);
     sendJson(response, 200, {
       ok: true,
       goal: serializeGoal(goal),
-      goals: listGoalsByCycle(userId, currentCycle.id),
+      goals: listGoalsByUser(userId),
       currentCycle,
     });
     return;
   }
 
   if (method === "POST" && action === "remove") {
-    const goal = removeGoalAmount(userId, currentCycle.id, goalId, body.amount);
+    const goal = removeGoalAmount(userId, goalId, body.amount);
     sendJson(response, 200, {
       ok: true,
       goal: serializeGoal(goal),
-      goals: listGoalsByCycle(userId, currentCycle.id),
+      goals: listGoalsByUser(userId),
       currentCycle,
     });
     return;

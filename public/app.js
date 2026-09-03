@@ -320,7 +320,7 @@ const sectionSwitcherItems = [
   { tab: "analysis", label: "Análise", copy: "Gastos e receitas" },
   { tab: "commitments", label: "Contas", copy: "Planejamento do mês" },
   { tab: "insights", label: "Insights", copy: "Leituras do ciclo" },
-  { tab: "goals", label: "Metas", copy: "Cofrinhos do ciclo" },
+  { tab: "goals", label: "Metas", copy: "Cofrinhos persistentes" },
   { tab: "cycles", label: "Ciclos", copy: "Histórico fechado" },
 ];
 
@@ -1147,7 +1147,7 @@ function renderSummary(totals, options = {}) {
   const currentCycle = state.currentCycle;
   const currentCycleLabel = currentCycle?.label || "Ciclo atual";
   const goalReserved = getGoalSavedTotal();
-  const availableBalance = totals.balance - goalReserved;
+  const availableBalance = totals.balance;
 
   elements.summaryPeriod.textContent = currentCycle?.status === "active" ? "Ciclo ativo" : "Ciclo";
   elements.currentCycleLabel.textContent = currentCycleLabel;
@@ -1166,7 +1166,7 @@ function renderSummary(totals, options = {}) {
       : "O ciclo ficou no vermelho. Ainda dá para ajustar cedo.";
   if (elements.goalReserveNote) {
     elements.goalReserveNote.hidden = goalReserved <= 0;
-    elements.goalReserveNote.textContent = goalReserved > 0 ? `${currency.format(goalReserved)} guardados em metas neste ciclo.` : "";
+    elements.goalReserveNote.textContent = goalReserved > 0 ? `${currency.format(goalReserved)} guardados em metas.` : "";
   }
   elements.behaviorRing.style.background = `conic-gradient(var(--cyan) ${degrees}deg, rgba(255,255,255,.08) ${degrees}deg)`;
   elements.behaviorPercent.textContent = `${percent}%`;
@@ -1613,8 +1613,8 @@ function getGoalSavedTotal() {
   return state.goals.reduce((sum, goal) => sum + Number(goal.savedAmount || 0), 0);
 }
 
-function getAvailableBalance(totals = getTotals(), reserved = getGoalSavedTotal()) {
-  return Number(totals.balance || 0) - Number(reserved || 0);
+function getAvailableBalance(totals = getTotals()) {
+  return Number(totals.balance || 0);
 }
 
 function groupExpensesByCategory() {
@@ -1775,7 +1775,7 @@ function periodLabel(tab) {
     analysis: "Ciclo ativo",
     commitments: "Contas do mês",
     insights: "Leituras do ciclo",
-    goals: "Cofrinhos do ciclo",
+    goals: "Cofrinhos persistentes",
     cycles: "Histórico de ciclos",
   };
   return labels[tab] || "Ciclo ativo";
@@ -1808,10 +1808,21 @@ function formatCyclePeriod(cycle) {
   return `Aberto em ${formatDate(cycle.startedAt)}`;
 }
 
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function todayLocal() {
+  return formatLocalDate(new Date());
+}
+
 function offsetDate(days) {
   const date = new Date();
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  return formatLocalDate(date);
 }
 
 function getCategoryMeta(category) {
@@ -1926,21 +1937,10 @@ function safeReceiptUrl(url) {
   return "";
 }
 
-function getAppBasePath() {
-  const pathname = String(window.location?.pathname || "/");
-  const segment = pathname.split("/").filter(Boolean)[0] || "";
-  return segment.toLowerCase() === "pulso" ? "/pulso" : "";
-}
-
 function resolveAppUrl(pathname) {
   if (!pathname) return "";
   if (/^(?:[a-z]+:|\/\/|blob:|data:)/i.test(pathname)) return pathname;
-
-  const basePath = getAppBasePath();
-  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  if (!basePath) return path;
-  if (path === basePath || path.startsWith(`${basePath}/`)) return path;
-  return `${basePath}${path}`;
+  return pathname.startsWith("/") ? pathname : `/${pathname}`;
 }
 
 function resolveReceiptUrl(url) {
@@ -2019,7 +2019,7 @@ function authErrorMessage(error) {
   if (error.code === "cycle_closed") return "Este ciclo está fechado e não aceita alterações.";
   if (error.code === "invalid_goal") return "Revise os campos da meta.";
   if (error.code === "invalid_goal_amount") return "Digite um valor válido para a meta.";
-  if (error.code === "goal_exists") return "Essa meta já existe neste ciclo.";
+  if (error.code === "goal_exists") return "Essa meta já existe.";
   if (error.code === "goal_not_found") return "Meta não encontrada.";
   if (error.code === "goal_target_too_low") return "O alvo não pode ficar abaixo do valor já guardado.";
   if (error.code === "goal_insufficient_saved") return "Não há valor suficiente guardado nessa meta.";
@@ -2359,7 +2359,6 @@ function normalizeGoalsPayload(items) {
   return Array.isArray(items)
     ? items.map((item) => ({
         id: item.id,
-        cycleId: item.cycleId,
         name: normalizeGoalName(item.name),
         slug: item.slug,
         accent: normalizeGoalAccent(item.accent, ""),
@@ -2931,7 +2930,7 @@ function toggleSectionSwitcher() {
 
 function openSheet(movement = null) {
   elements.form.reset();
-  elements.date.value = new Date().toISOString().slice(0, 10);
+  elements.date.value = todayLocal();
   elements.movementId.value = "";
   elements.formTitle.textContent = "Adicionar rápido";
   resetReceiptDraft();
@@ -3669,8 +3668,8 @@ function renderGoals(totals) {
   }
   if (elements.goalsHeroCopy) {
     elements.goalsHeroCopy.textContent = goalCount
-      ? `Você já guardou ${currency.format(reserved)} em ${goalCount} meta${goalCount === 1 ? "" : "s"} neste ciclo.`
-      : "Separe parte do saldo do ciclo e acompanhe o progresso de cada meta.";
+      ? `Você já guardou ${currency.format(reserved)} em ${goalCount} meta${goalCount === 1 ? "" : "s"}.`
+      : "Separe parte do saldo e acompanhe o progresso de cada meta.";
   }
   if (elements.goalsSavedTotal) {
     elements.goalsSavedTotal.textContent = currency.format(reserved);
@@ -3690,7 +3689,7 @@ function renderGoals(totals) {
   elements.goalList.replaceChildren(
     ...(state.goals.length
       ? state.goals.map((goal) => renderGoalCard(goal, available))
-      : [renderEmptyState("Nenhuma meta ainda", "Crie um cofrinho para separar parte do saldo do ciclo.")]),
+      : [renderEmptyState("Nenhuma meta ainda", "Crie um cofrinho para separar parte do saldo.")]),
   );
 }
 

@@ -39,3 +39,12 @@ Desktop.ini
 
 # Database directories/files
 data/
+
+# Cloudflare Wrangler local state (D1/R2 local simulation, cache)
+.wrangler/
+
+# Local secrets file — never commit
+.dev.vars
+
+# Temp D1 import file
+.d1-import-temp.sql

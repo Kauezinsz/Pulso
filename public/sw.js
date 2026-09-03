@@ -1,4 +1,4 @@
-const CACHE_NAME = "pulso-pwa-v15-polish";
+const CACHE_NAME = "pulso-pwa-v16-cloudflare";
 const APP_SHELL = [
   "./",
   "./index.html",

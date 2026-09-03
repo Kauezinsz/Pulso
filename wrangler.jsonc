@@ -1,0 +1,27 @@
+{
+  "name": "pulso",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-04",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pulso-db",
+      "database_id": "COLOCAR_ID_REAL_DO_D1"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "RECEIPTS",
+      "bucket_name": "pulso-receipts"
+    }
+  ],
+  "vars": {
+    "APP_BASE_PATH": "",
+    "SESSION_DAYS": "30"
+  }
+}
